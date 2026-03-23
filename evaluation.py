@@ -35,17 +35,22 @@ def evaluer_modele(dossier_images, fichier_json, taille_flou=(7, 7)):
         else:
             print(f"[OK] {nom_fichier} | Prédit: {prediction} | Réel: {vrai_nombre}")
 
-    # Calcul des métriques de régression [cite: 289-291, 419, 423]
+    # Calcul des métriques de régression
     N = len(erreurs_absolues)
     if N == 0:
         return
 
     mae = sum(erreurs_absolues) / N
     mse = sum(erreurs_quadratiques) / N
+    
+    mean_real_amount = sum(verite_terrain.values()) / N
+    mae_percentage = (mae / mean_real_amount) * 100 if mean_real_amount > 0 else 0
 
     print("-" * 40)
-    # La MAE renseigne directement sur la distance moyenne aux prédictions[cite: 421].
+    # La MAE renseigne directement sur la distance moyenne aux prédictions.
     print(f"MAE (Erreur Absolue Moyenne)     : {mae:.2f}")
-    # La MSE pénalise lourdement les grosses aberrations[cite: 424, 435].
+    # La MSE pénalise lourdement les grosses aberrations.
     print(f"MSE (Erreur Quadratique Moyenne) : {mse:.2f}")
+    print(f"Nombre Moyen Réel de Pièces      : {mean_real_amount:.2f}")
+    print(f"Pourcentage d'Erreur (MAE/Mean)  : {mae_percentage:.2f}%")
     print("-" * 40)
