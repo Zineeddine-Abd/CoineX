@@ -23,5 +23,6 @@ dist/
 .DS_Store
 Thumbs.db
 
-data/
+data/test/
+data/validation/
 data_brute/
