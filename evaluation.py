@@ -54,3 +54,5 @@ def evaluer_modele(dossier_images, fichier_json, taille_flou=(7, 7)):
     print(f"Nombre Moyen Réel de Pièces      : {mean_real_amount:.2f}")
     print(f"Pourcentage d'Erreur (MAE/Mean)  : {mae_percentage:.2f}%")
     print("-" * 40)
+
+    
