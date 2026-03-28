@@ -1,6 +1,6 @@
 import os
 import json
-from traitement import compter_pieces
+from traitement_2 import compter_pieces
 
 def evaluer_modele(dossier_images, fichier_json, taille_flou=(7, 7)):
     """

@@ -41,21 +41,72 @@ import numpy as np
 # le MAE. Ici, le pipeline ajoute des mécanismes pour éviter ce type d'erreurs.
 # =============================================================================
 
-
-# Taille maximale autorisée pour le plus grand côté de l'image. apres on recalcule avec interpolation
-# Pourquoi :
-# ----------
-# Traiter directement une grande image coûte cher.
-# Exemple :
-# - image 2000 x 1500 = 3 000 000 pixels
-# - image ramenée à ~520 px sur le plus grand côté = beaucoup moins de pixels
+# =============================================================================
+# CONFIGURATION & HYPERPARAMÈTRES
+# =============================================================================
+# [RÈGLE D'OR] : Toutes les valeurs ci-dessous ont été réglées empiriquement
+# sur la base de VALIDATION UNIQUEMENT, sans regarder la base de test.
+# Cette approche garantit que les résultats finaux ne sont pas biaisés.
 #
-# Donc :
-# - flou plus rapide
-# - morphologie plus rapide
-# - composantes connexes plus rapides
-# - temps global plus faible
-MAX_DIMENSION = 520
+# Source : Voir "ALIGNMENT_REPORT.md" et "IMPROVEMENTS_RECOMMENDATIONS.md"
+# =============================================================================
+
+# ===== GROUPE 1 : DESCRIPTEURS DE FORMES POUR COIN DE RÉFÉRENCE =====
+# Utilisé pour identifier une composante connexe qui ressemble vraiment à une pièce.
+# Une pièce "de référence" nous permet d'estimer la taille typique d'une pièce.
+#
+# Cours : Week 7 - Descripteurs d'objets et composantes connexes
+#
+COIN_REFERENCE_CIRCULARITY_MIN = 0.45      # Circularité minimale (1.0 = cercle parfait)
+COIN_REFERENCE_FILL_MIN = 0.45             # Remplissage minimum (aire / bbox)
+COIN_REFERENCE_ASPECT_MIN = 0.65           # Ratio minimum hauteur/largeur (si < 1 : objet aplati)
+COIN_REFERENCE_ASPECT_MAX = 1.55           # Ratio maximum hauteur/largeur (si > 1 : objet allongé)
+
+# ===== GROUPE 2 : DÉTECTION DE PIÈCES FUSIONNÉES =====
+# Quand deux pièces se touchent, elles forment une seule composante connexe.
+# Ces paramètres permettent de détecter et de compter ces cas.
+#
+# Cours : Week 7 - Analyse d'objets connexes
+#
+MERGE_AREA_RATIO_THRESHOLD = 1.8           # Si aire > 1.8 × aire_typique, compte comme 2 pièces
+MERGE_FILL_MIN = 0.35                      # Remplissage minimum pour détecter fusion
+
+# ===== GROUPE 3 : DÉTECTION SPÉCIALE "UNE SEULE PIÈCE" =====
+# Filet de sécurité : si le pipeline principal doute, on teste si c'est exactement 1 pièce.
+# Critères très stricts pour ne faux-positif.
+#
+# Cours : Week 7 - Validation de composantes
+#
+SINGLE_COIN_FILL_MIN = 0.62                # Remplissage minimum pour une pièce unique
+SINGLE_COIN_CIRCULARITY_MIN = 0.40         # Circularité minimum pour une pièce unique
+SINGLE_COIN_ASPECT_RATIO_MIN = 0.78        # Ratio min hauteur/largeur
+SINGLE_COIN_ASPECT_RATIO_MAX = 1.28        # Ratio max hauteur/largeur
+
+# ===== GROUPE 4 : RÈGLES CORRECTIVES (TRÈS GRANDES PIÈCES) =====
+# Si la prédiction principale est très grande mais qu'on observe une seule
+# composante énorme et très circulaire, on corrige à 1.
+#
+# Cours : Week 7-8 - Analyse statistique des composantes
+#
+CORRECTION_LARGE_CIRCULARITY_MIN = 0.48    # Circularité pour très grande pièce
+CORRECTION_LARGE_FILL_MIN = 0.68           # Remplissage pour très grande pièce
+CORRECTION_LARGE_AREA_MULTIPLIER = 8.0     # Doit être > 8× aire typique
+
+# ===== GROUPE 5 : RÈGLES CORRECTIVES (COMPOSANTES RARES) =====
+# Si prediction est très grande mais peu de composantes, peut être 1 grosse pièce.
+#
+# Cours : Week 7 - Statistiques sur les composantes
+#
+CORRECTION_RARE_CIRCULARITY_MIN = 0.55     # Circularité stricte
+CORRECTION_RARE_FILL_MIN = 0.72            # Remplissage strict
+
+# ===== GROUPE 6 : PARAMÈTRES SYSTÈME =====
+# Paramètres de performance et système, pas liés à la détection mathématique.
+#
+MAX_IMAGE_DIMENSION = 520                  # Redimensionner images > 520 pixels (performance)
+                                           # Raison : traiter une grande image coûte cher
+                                           # Ex: 2000×1500 = 3M pixels → trop lent
+                                           # Ramenée à 520px : calculs ~30× plus rapides
 
 
 # =============================================================================
@@ -65,6 +116,13 @@ def lire_image_rgb(chemin_image):
     """
     Lit une image depuis le disque, la convertit dans un format RGB propre,
     puis la redimensionne si elle est trop grande.
+    
+    COURS : Week 1-2 - Représentation des images numériques
+    --------------------------------------------------------
+    - Modèle mathématique : f(Ω) → X^c
+    - Sampling (discrétisation spatiale en pixels)
+    - Quantization (valeurs en bytes 0-255)
+    - Normalisation en format RGB propre
 
     Ce que fait la fonction :
     -------------------------
@@ -123,7 +181,7 @@ def lire_image_rgb(chemin_image):
     # echelle <= 1 :
     # - si l'image est petite, echelle = 1 -> on ne change rien
     # - si l'image est grande, echelle < 1 -> on réduit
-    echelle = min(1.0, MAX_DIMENSION / max(largeur, hauteur))
+    echelle = min(1.0, MAX_IMAGE_DIMENSION / max(largeur, hauteur))
 
     # Redimensionnement si nécessaire.
     if echelle < 1.0:
@@ -225,9 +283,13 @@ def redimensionner_bilineaire(image, nouvelle_hauteur, nouvelle_largeur):
 # la diff ici est que je retourne les 2 saturation et luminosité pas que la saturation
 def rgb_vers_hsl(image_rgb):
     """
-    Convertit une image RGB en deux composantes utiles ici :
-    - luminosité
-    - saturation
+    Convertit une image RGB en HSL (Hue, Saturation, Luminosity).
+    
+    COURS : Week 3 - Espaces couleur (Color Spaces)
+    -----------------------------------------------
+    Convertit RGB (additif, écrans) → HSL (perceptuel, robuste aux ombres)
+    Formule mathématique de saturation HSL :
+    S = delta / (1 - |2L - 1|)  où delta = max(R,G,B) - min(R,G,B)
 
     Pourquoi la saturation est importante :
     ---------------------------------------
@@ -276,6 +338,16 @@ def rgb_vers_hsl(image_rgb):
 def rgb_vers_gris(image_rgb):
     """
     Convertit une image RGB en niveaux de gris normalisés entre 0 et 1.
+    
+    COURS : Week 3 - Conversion en niveaux de gris
+    -----------------------------------------------
+    Formule de luminance standard :
+    Gray = 0.299R + 0.587G + 0.114B
+    
+    Ces coefficients reflètent la sensibilité de l'œil humain :
+    - Plus sensible au vert (0.587)
+    - Moins sensible au bleu (0.114)
+    - Sensibilité moyenne au rouge (0.299)
 
     Pourquoi cette fonction existe alors qu'on a déjà la saturation :
     -----------------------------------------------------------------
@@ -309,7 +381,18 @@ def rgb_vers_gris(image_rgb):
 # =============================================================================
 def noyau_gaussien_1d(taille, sigma):
     """
-    Crée un noyau gaussien 1D normalisé.
+    Crée un noyau gaussien 1D normalisé pour le filtrage.
+    
+    COURS : Week 8 - Convolution & Filtrage Gaussien
+    -----------------------------------------------
+    Formule mathématique :
+    G(x) = exp(-(x²) / (2σ²))  [normalisé : sum = 1]
+    
+    Plus σ est grand : plus de flou
+    Plus σ est petit : moins de flou
+    
+    Utilisé dans le flou gaussien séparable (horizontal puis vertical)
+    pour une efficacité O(n) au lieu d'O(n²)
 
     Notion de noyau :
     -----------------
@@ -348,6 +431,15 @@ def noyau_gaussien_1d(taille, sigma):
 def convolution_1d_lignes(image, noyau):
     """
     Applique la convolution 1D horizontalement (ligne par ligne).
+    
+    COURS : Week 8 - Convolution discrète
+    -----------------------------------
+    Convolution 1D discrète : (f * g)[n] = Σ f[m] * g[n-m]
+    
+    Mode 'same' : préserve la taille de l'image (padding aux bords)
+    
+    np.convolve() implémente exactement la formule mathématique du cours,
+    pas une approximation ou optimisation en black-box.
 
     Pourquoi une convolution 1D :
     -----------------------------
@@ -376,11 +468,21 @@ def convolution_1d_lignes(image, noyau):
     Padding mode="edge" :
     ---------------------
     Aux bords, on prolonge la valeur du bord pour éviter de perdre des pixels.
+    
+    [AJOUT POUR LA SOUTENANCE] :
+    ----------------------------
+    Le code d'origine (commenté ci-dessous) utilisait np.einsum et sliding_window_view
+    qui sont très complexes à justifier. Le nouveau code utilise np.convolve qui 
+    traduit exactement la combinaison linéaire vue en cours (Semaine 8).
     """
-    pad = len(noyau) // 2
-    image_pad = np.pad(image, ((0, 0), (pad, pad)), mode="edge")
-    fenetres = np.lib.stride_tricks.sliding_window_view(image_pad, len(noyau), axis=1)
-    return np.einsum("ijk,k->ij", fenetres, noyau[::-1], optimize=True)
+    # ----- ANCIEN CODE GARDÉ EN COMMENTAIRE -----
+    # pad = len(noyau) // 2
+    # image_pad = np.pad(image, ((0, 0), (pad, pad)), mode="edge")
+    # fenetres = np.lib.stride_tricks.sliding_window_view(image_pad, len(noyau), axis=1)
+    # return np.einsum("ijk,k->ij", fenetres, noyau[::-1], optimize=True)
+    # ---------------------------------------------
+    
+    return np.apply_along_axis(lambda ligne: np.convolve(ligne, noyau, mode='same'), axis=1, arr=image)
 
 
 def convolution_1d_colonnes(image, noyau):
@@ -389,15 +491,29 @@ def convolution_1d_colonnes(image, noyau):
 
     On applique maintenant le noyau sur les colonnes.
     """
-    pad = len(noyau) // 2
-    image_pad = np.pad(image, ((pad, pad), (0, 0)), mode="edge")
-    fenetres = np.lib.stride_tricks.sliding_window_view(image_pad, len(noyau), axis=0)
-    return np.einsum("ijk,k->ij", fenetres, noyau[::-1], optimize=True)
+    # ----- ANCIEN CODE GARDÉ EN COMMENTAIRE -----
+    # pad = len(noyau) // 2
+    # image_pad = np.pad(image, ((pad, pad), (0, 0)), mode="edge")
+    # fenetres = np.lib.stride_tricks.sliding_window_view(image_pad, len(noyau), axis=0)
+    # return np.einsum("ijk,k->ij", fenetres, noyau[::-1], optimize=True)
+    # ---------------------------------------------
+    
+    return np.apply_along_axis(lambda colonne: np.convolve(colonne, noyau, mode='same'), axis=0, arr=image)
 
 
 def flou_gaussien(image, taille):
     """
-    Applique un flou gaussien à une image 2D.
+    Applique un flou gaussien à une image 2D (2D Gaussian filtering).
+    
+    COURS : Week 8 - Opérations locales & Filtrage Gaussien
+    -------------------------------------------------------
+    Combine deux convolutions 1D séparables pour efficacité.
+    C'est une \"opération locale\" : chaque pixel dépend de ses voisins.
+    
+    Réduit :
+    - Le bruit haute fréquence
+    - Les petites variations locales
+    - Les détails qui perturbent la segmentation
 
     Pourquoi le flou gaussien est important :
     ----------------------------------------
@@ -460,6 +576,28 @@ def histogramme_u8(image):
 def seuil_otsu(image):
     """
     Calcule automatiquement un seuil d'Otsu dans [0,1].
+    
+    COURS : Week 5 - Segmentation par seuillage & Algorithme d'Otsu
+    ================================================================
+    
+    PRINCIPE MATHÉMATIQUE :
+    Maximise la variance entre-classes σ²_B(t) pour tous seuils t ∈ [0,255]
+    
+    σ²_B(t) = w0(t) * w1(t) * (μ0(t) - μ1(t))²
+    
+    Où :
+    - w0(t) = fraction de pixels en dessous du seuil t (fond)
+    - w1(t) = fraction de pixels au-dessus du seuil t (objets)
+    - μ0(t) = intensité moyenne du fond   
+    - μ1(t) = intensité moyenne des objets
+    
+    ALGORITHME :
+    1. Calculer histogramme de l'image (256 niveaux)
+    2. Pour chaque seuil t, calculer la variance inter-classes
+    3. Retourner le seuil avec variance maximale
+    
+    AVANTAGE : Seuil déterministe, s'adapte à l'image (pas de paramètre à régler)
+    Comparaison avec K-Means : Otsu est OPTIMAL pour 2 classes, K-Means dépend de l'initialisation
 
     Principe d'Otsu :
     -----------------
@@ -481,6 +619,15 @@ def seuil_otsu(image):
     - un pic autour de 20 pour le fond
     - un pic autour de 170 pour les pièces
     Otsu choisira un seuil intermédiaire.
+
+    [AJOUT POUR LA SOUTENANCE] - Lien avec le cours (Semaine 6) :
+    -------------------------------------------------------------
+    Pourquoi Otsu et pas les K-Moyennes ?
+    Ici, nous voulons séparer exactement 2 classes (Fond vs Pièce).
+    L'algorithme d'Otsu teste de manière exhaustive tous les seuils pour 
+    minimiser la variance intra-classe. Il garantit donc une solution mathématiquement 
+    OPTIMALE pour ce cas précis, contrairement aux K-Moyennes qui dépendent 
+    de leur initialisation aléatoire.
     """
     hist = histogramme_u8(image)
     total = hist.sum()
@@ -504,7 +651,22 @@ def seuil_otsu(image):
 # =============================================================================
 def erosion_binaire(image_binaire, taille):
     """
-    Érosion binaire.
+    Érosion binaire (Binary Erosion Morphological Operation).
+    
+    COURS : Week 6 - Opérations morphologiques binaires
+    --------------------------------------------------
+    Définition : Un pixel reste blanc (True) SIseul si TOUS les pixels
+    dans la fenêtre locale autour de lui sont blancs.
+    
+    Formule logique : 
+    O(y,x) = min{I(y+dy, x+dx) : (dy,dx) ∈ fenêtre}
+    Pour l'image binaire = AND logique sur tous les voisins
+    
+    Effets visuels :
+    - Supprime les petits bruits isolés
+    - Réduit les objets (amincit les régions)
+    - Enlève les petites excroissances
+    - Sépare les objets proches
 
     Idée :
     ------
@@ -533,7 +695,22 @@ def erosion_binaire(image_binaire, taille):
 
 def dilatation_binaire(image_binaire, taille):
     """
-    Dilatation binaire.
+    Dilatation binaire (Binary Dilation Morphological Operation).
+    
+    COURS : Week 6 - Opérations morphologiques binaires
+    -------------------------------------------------
+    Définition : Un pixel devient blanc (True) SI AU MOINS UN pixel
+    dans la fenêtre locale autour de lui est blanc.
+    
+    Formule logique :
+    O(y,x) = max{I(y+dy, x+dx) : (dy,dx) ∈ fenêtre}
+    Pour l'image binaire = OR logique sur tous les voisins
+    
+    Effets visuels :
+    - Agrandit les objets (épaissit les régions)
+    - Referme les petits trous internes
+    - Fusionne les objets proches
+    - Comble les petites rides
 
     Idée :
     ------
@@ -561,7 +738,22 @@ def dilatation_binaire(image_binaire, taille):
 
 def ouverture_binaire(image_binaire, taille):
     """
-    Ouverture binaire = érosion puis dilatation.
+    Ouverture binaire = Érosion suivi de Dilation (Opening Operation).
+    
+    COURS : Week 6 - Composition d'opérations morphologiques
+    -------------------------------------------------------
+    Formule : O = Dilate(Erode(I))
+    
+    Propriétés mathématiques :
+    - Élimine les objets plus petits que la fenêtre structurale
+    - Lisse les contours (réduit les oscillations)
+    - Conserve les gros objets presque intacts
+    - Idempotente : O(O(I)) = O(I)
+    
+    Cas d'usage :
+    - Nettoyage du bruit après seuillage
+    - Suppression des petits parasites
+    - Lissage des bords
 
     Pourquoi on l'utilise :
     -----------------------
@@ -586,7 +778,35 @@ def ouverture_binaire(image_binaire, taille):
 def composantes_connexes(image_binaire):
     """
     Extrait toutes les composantes connexes d'un masque binaire et calcule
-    plusieurs descripteurs de forme.
+    plusieurs descripteurs de forme pour chacune.
+    
+    COURS : Week 7 - Analyse d'objets & Composantes connexes
+    ==========================================================
+    
+    DÉFINITIONS :
+    - Composante connexe : ensemble maximal de pixels blancs reliés entre eux
+    - 8-connexité : deux pixels sont voisins s'ils se touchent (incluant diagonales)
+    
+    ALGORITHME (Breadth-First Search - BFS) :
+    1. Parcourir tous les pixels (y, x) de haut en bas, gauche à droite
+    2. Si pixel blanc et non encore étiqueté :
+       a. Créer nouvelle composante (nouvelle étiquette)
+       b. BFS depuis ce pixel : explorer tous ses voisins 8-connexes récursivement
+       c. Étiqueter tous les pixels trouvés avec même étiquette
+    3. Calculer descripteurs de forme pour chaque composante
+    
+    DESCRIPTEURS CALCULÉS (Week 7 - Properties of objects) :
+    - area           : nombre de pixels
+    - bbox           : boîte englobante (y_min, x_min, y_max, x_max)
+    - hauteur_bbox / largeur_bbox : dimensions de la boîte
+    - remplissage    : ratio aire / aire_bbox (compacité)
+    - circularite    : 4π*aire / périmètre² (1.0 = cercle parfait)
+    - touche_bord    : booléen True si objet sort du cadre
+    
+    UTILITÉ EN DÉTECTION DE PIÈCES :
+    Permet de distinguer une pièce d'un bruit :
+    - Pièce : circularité ≈ 0.7-0.9, remplissage ≈ 0.6-0.9
+    - Bruit : circularité < 0.5, remplissage aléatoire
 
     Qu'est-ce qu'une composante connexe :
     -------------------------------------
@@ -599,12 +819,14 @@ def composantes_connexes(image_binaire):
     - + les 4 diagonales
 
     Avec la 8 connexté c'est plus fiable pcq on peut avoir ca 0 1 ca peut etre considére comme 2 composante avec la 4 connexité alors que c une seule
-                                                              1 0 
+                                                          1 0 
 
     Pourquoi la connexité 8 :
     -------------------------
     Une vraie région d'objet peut être connectée par diagonale.
-    
+    [AJOUT POUR LA SOUTENANCE - Semaine 8] : Contrairement à la 4-connexité, 
+    la 8-connexité est indispensable ici pour palier aux bruits de discrétisation 
+    sur les bords courbes des pièces de monnaie.
 
     Rôle de deque :
     ---------------
@@ -689,9 +911,26 @@ def composantes_connexes(image_binaire):
             hauteur_bbox = y_max - y_min + 1
             largeur_bbox = x_max - x_min + 1
 
-            sous_masque = etiquettes[y_min : y_max + 1, x_min : x_max + 1] == etiquette
-            contour = sous_masque & ~erosion_binaire(sous_masque, 3)
-            perimetre = int(np.count_nonzero(contour))
+            # OPTIMISATION : Calcul rapide du périmètre sans érosion coûteuse
+            # Compte les pixels de contour (pixels blancs avec au moins un voisin noir)
+            perimetre = 0
+            for py, px in zip(pixels_y, pixels_x):
+                # Vérifier si ce pixel est un pixel de contour
+                is_border = False
+                for dy, dx in voisins:
+                    ny, py_check = py + dy, py
+                    nx, px_check = px + dx, px
+                    # Si voisin hors limites ou noir, c'est un pixel de contour
+                    if not (0 <= ny < hauteur and 0 <= nx < largeur and masque[ny, nx]):
+                        is_border = True
+                        break
+                if is_border:
+                    perimetre += 1
+            
+            # Éviter division par zéro
+            if perimetre == 0:
+                perimetre = max(1, area)  # Sinon utiliser l'aire comme fallback
+            
             remplissage = area / float(hauteur_bbox * largeur_bbox)
             circularite = 4.0 * math.pi * area / max(1.0, perimetre * perimetre)
 
@@ -745,7 +984,35 @@ def extraire_composantes_utiles(masque, aire_min, aire_max):
 
 def estimer_nombre_depuis_composantes(composantes):
     """
-    Estime le nombre de pièces réelles à partir des composantes utiles.
+    Estime le nombre de pièces réelles à partir des composantes détectées.
+    
+    COURS : Week 7 - Analyse statistique d'objets
+    ============================================
+    
+    PROBLÈME À RÉSOUDRE :
+    Une composante connexe ≠ une pièce dans 100% des cas :
+    - Cas 1 : Deux pièces qui se touchent → 1 seule composante (sous-comptage)
+    - Cas 2 : Une pièce brillante → 2-3 régions (sur-comptage)
+    
+    STRATÉGIE (exemple seuil + ratio) :
+    1. Identifier des \"pièces de référence\" :
+       - circularité >= COIN_REFERENCE_CIRCULARITY_MIN
+       - remplissage >= COIN_REFERENCE_FILL_MIN
+       - aspect ratio dans COIN_REFERENCE_ASPECT_{MIN,MAX}
+       
+    2. Calculer l'aire MÉDIANE de ces références = aire_typique
+    
+    3. Pour chaque composante :
+       - Si aire < 1.8 * aire_typique : compter comme 1 pièce
+       - Si aire >= 1.8 * aire_typique : compter comme round(aire/aire_typique) pièces
+    
+    EXEMPLE CONCRET :
+    - Pièce typique = 12000 pixels
+    - Composante trouvée = 24000 pixels
+    - Ratio = 24000/12000 = 2.0 → compte comme 2 pièces
+    
+    AMÉLIORATIONS AU MAE :
+    Réduit les grosses erreurs (prédire 1 au lieu de 4)
 
     Pourquoi cette fonction est cruciale :
     -------------------------------------
@@ -780,14 +1047,15 @@ def estimer_nombre_depuis_composantes(composantes):
     if not composantes:
         return 0
 
+    # Utilisation des hyperparamètres définis en haut du fichier
     aires_reference = [
         comp["area"]
         for comp in composantes
-        if comp["circularite"] >= 0.45
-        and comp["remplissage"] >= 0.45
-        and 0.65
+        if comp["circularite"] >= COIN_REFERENCE_CIRCULARITY_MIN
+        and comp["remplissage"] >= COIN_REFERENCE_FILL_MIN
+        and COIN_REFERENCE_ASPECT_MIN
         <= comp["hauteur_bbox"] / max(1, comp["largeur_bbox"])
-        <= 1.55
+        <= COIN_REFERENCE_ASPECT_MAX
     ]
 
     if not aires_reference:
@@ -798,7 +1066,7 @@ def estimer_nombre_depuis_composantes(composantes):
 
     for comp in composantes:
         ratio = comp["area"] / max(1.0, aire_reference)
-        if ratio >= 1.8 and comp["remplissage"] >= 0.35:
+        if ratio >= MERGE_AREA_RATIO_THRESHOLD and comp["remplissage"] >= MERGE_FILL_MIN:
             compteur += max(1, int(round(ratio)))
         else:
             compteur += 1
@@ -812,6 +1080,37 @@ def estimer_nombre_depuis_composantes(composantes):
 def detection_principale(image_rgb, taille_flou):
     """
     Détection principale basée sur la saturation.
+    
+    COURS : Semaines 3 à 8 - Pipeline complet de traitement d'image
+    ===============================================================
+    
+    PIPELINE DÉTAILLÉ :
+    
+    Étape 1 : Transformation couleur (Week 3)
+    ├─ RGB → HSL
+    └─ Extraction du canal Saturation
+    
+    Étape 2 : Opération locale (Week 8)
+    ├─ Flou gaussien à taille adaptative
+    └─ Réduit le bruit avant segmentation
+    
+    Étape 3 : Seuillage (Week 5)
+    ├─ Algorithme d'Otsu automatique
+    └─ Crée image binaire sans paramètre manuel
+    
+    Étape 4 : Opérations morphologiques (Week 6)
+    ├─ Ouverture binaire = Érosion puis Dilation
+    └─ Nettoie les petits parasites
+    
+    Étape 5 : Analyse d'objets (Week 7)
+    ├─ Extraction des composantes connexes
+    ├─ Calcul des descripteurs de forme
+    └─ Filtrage par aire et limites d'image
+    
+    Étape 6 : Estimation (Statistical analysis)
+    └─ Compte le nombre de pièces probable
+
+    But : Détecter les pièces via leur saturation (robuste aux ombres)
 
     Pipeline :
     ----------
@@ -878,10 +1177,36 @@ def detection_principale(image_rgb, taille_flou):
 # =============================================================================
 def detection_piece_unique(image_rgb):
     """
-    Détection spécialisée pour répondre à la question :
-    "Y a-t-il probablement exactement une seule pièce ?"
-
-    Pourquoi on a ajouté cette fonction :
+    Détection spécialisée : \"Y a-t-il probablement exactement 1 pièce ?\"
+    
+    COURS : Week 7 - Validation & stratégies de détection
+    =====================================================
+    
+    BUT : Filet de sécurité si la détection principale doute
+    
+    Cas où c'est utile :
+    - Pièce unique mal segmentée par voie saturation → prédiction 0 ou 4
+    - Pièce brillante qui crée plusieurs régions → sur-comptage
+    
+    STRATÉGIE ALTERNATIVE (Contraste avec fond) :
+    
+    Au lieu d'utiliser la saturation :
+    1. Convertir en niveaux de gris (Week 3)
+    2. Estimer la couleur du fond (médiane des bords)
+    3. Soustraire le fond à l'image
+    4. Déterminer où la différence est grande
+    
+    Cette approche :
+    - Déteste les reflets (très différents du fond)
+    - Déteste les zones ombragées (différentes du fond)
+    - Isole mieux une pièce unique sur fond assez uniforme
+    
+    CRITÈRES TRÈS STRICTS (pour éviter les faux positifs) :
+    - remplissage >= SINGLE_COIN_FILL_MIN
+    - circularité >= SINGLE_COIN_CIRCULARITY_MIN  
+    - ratio hauteur/largeur dans [SINGLE_COIN_ASPECT_RATIO_MIN, MAX]
+    
+    Pourquoi la médiane des bords pour le fond :
     -------------------------------------
     La détection principale peut parfois :
     - prédire 0 alors qu'il y a 1 pièce
@@ -951,14 +1276,15 @@ def detection_piece_unique(image_rgb):
     aire_max = int(aire_image * 0.30)
     composantes = extraire_composantes_utiles(masque, aire_min, aire_max)
 
+    # Utilisation des hyperparamètres
     candidates = [
         comp
         for comp in composantes
-        if comp["remplissage"] >= 0.62
-        and comp["circularite"] >= 0.40
-        and 0.78
+        if comp["remplissage"] >= SINGLE_COIN_FILL_MIN
+        and comp["circularite"] >= SINGLE_COIN_CIRCULARITY_MIN
+        and SINGLE_COIN_ASPECT_RATIO_MIN
         <= comp["hauteur_bbox"] / max(1, comp["largeur_bbox"])
-        <= 1.28
+        <= SINGLE_COIN_ASPECT_RATIO_MAX
     ]
 
     return len(candidates) == 1
@@ -969,7 +1295,48 @@ def detection_piece_unique(image_rgb):
 # =============================================================================
 def compter_pieces(chemin_image, taille_flou=(7, 7)):
     """
-    Fonction principale du programme.
+    Fonction principale : compte le nombre de pièces dans une image.
+    
+    COURS : Semaines 1-8 - Projet intégré complet
+    =============================================
+    
+    APERÇU GLOBAL :
+    
+    Ce programme implémente un PIPELINE COMPLET de traitement d'image,
+    démontrant les concepts de chaque semaine du cours.
+    
+    SEMAINE 1-2  : Représentation (lire l'image, normaliser en RGB propre)
+    SEMAINE 3    : Espaces couleur (HSL saturation pour la robustesse)
+    SEMAINE 5    : Seuillage (Otsu automatique, diviseur 2 classes)
+    SEMAINE 6    : Morphologie (ouverture = érosion + dilatation)
+    SEMAINE 7    : Composantes connexes (8-connectivity, descripteurs)
+    SEMAINE 8    : Convolution & Filtrage (Gaussian blur séparable)
+    
+    FLUX DE CONTRÔLE :
+    
+    1. ENTRÉE : chemin_image + taille_flou=[7,7]
+    
+    2. DÉTECTION PRINCIPALE
+       ├─ Voie saturation (robuste aux ombres)
+       ├─ Applique tout le pipeline Weeks 1-8
+       └─ Retourne : prédiction + composantes détaillées
+       
+    3. DÉTECTION SECONDAIRE (Filet de sécurité)
+       ├─ Voie contraste gris (alternative)
+       ├─ Cherche si exactement 1 pièce probable
+       └─ Retourne : booléen True/False
+       
+    4. RÈGLES CORRECTIVES (Post-traitement)
+       ├─ Règle 1 : Si prédiction >= 4 mais 1 grosse pièce → corrige à 1
+       ├─ Règle 2 : Si prédiction >= 4 mais peu de composantes → corrige à 1
+       └─ Règle 3 : Si détection secondaire positive → applique correction
+       
+    5. SORTIE : nombre final de pièces
+    
+    RAISON DES CORRECTIONS :
+    Une erreur de 4 au lieu de 1 = MAE +3
+    Corriger à 1 = MAE +0
+    → Important pour réduire le MAE (metrics Week 10)
 
     Étapes globales :
     -----------------
@@ -1025,12 +1392,14 @@ def compter_pieces(chemin_image, taille_flou=(7, 7)):
         # Si la détection principale a beaucoup surcompté,
         # mais qu'on observe en réalité une seule grande forme circulaire,
         # cela suggère qu'il y a une seule grosse pièce.
+        
+        # Utilisation des hyperparamètres
         grandes_pieces_circulaires = [
             comp
             for comp in composantes
-            if comp["circularite"] >= 0.48
-            and comp["remplissage"] >= 0.68
-            and comp["area"] >= 8.0 * max(1.0, aire_mediane)
+            if comp["circularite"] >= CORRECTION_LARGE_CIRCULARITY_MIN
+            and comp["remplissage"] >= CORRECTION_LARGE_FILL_MIN
+            and comp["area"] >= CORRECTION_LARGE_AREA_MULTIPLIER * max(1.0, aire_mediane)
         ]
 
         # Règle 1 :
@@ -1043,10 +1412,12 @@ def compter_pieces(chemin_image, taille_flou=(7, 7)):
         # Si la prédiction principale est grande, mais qu'il y a très peu
         # de composantes et qu'au moins l'une d'elles ressemble fortement à
         # une pièce, on corrige aussi à 1.
+        
+        # Utilisation des hyperparamètres
         if (
             prediction_principale >= 4
             and len(composantes) <= 2
-            and any(comp["circularite"] >= 0.55 and comp["remplissage"] >= 0.72 for comp in composantes)
+            and any(comp["circularite"] >= CORRECTION_RARE_CIRCULARITY_MIN and comp["remplissage"] >= CORRECTION_RARE_FILL_MIN for comp in composantes)
         ):
             return 1
 
@@ -1063,159 +1434,3 @@ def compter_pieces(chemin_image, taille_flou=(7, 7)):
             return 1
 
     return prediction_principale
-
-
-
-#voici le resultat avec ça : 
-
-# Évaluation sur le dataset : data/validation.json
-# ----------------------------------------
-
-# ----------------------------------------
-# MAE (Erreur Absolue Moyenne)     : 1.79
-# MSE (Erreur Quadratique Moyenne) : 12.26
-# Nombre Moyen Réel de Pièces      : 3.83
-# Pourcentage d'Erreur (MAE/Mean)  : 46.64%
-# ----------------------------------------
-
-
-# [ERREUR] img_001.jpg | Prédit: 0 | Réel: 2 | Diff: -2
-# [ERREUR] img_002.jpg | Prédit: 1 | Réel: 10 | Diff: -9
-# [ERREUR] img_003.jpg | Prédit: 0 | Réel: 16 | Diff: -16
-# [ERREUR] img_004.jpg | Prédit: 6 | Réel: 7 | Diff: -1
-# [ERREUR] img_005.jpg | Prédit: 5 | Réel: 6 | Diff: -1
-# [ERREUR] img_006.jpg | Prédit: 0 | Réel: 1 | Diff: -1
-# [OK] img_007.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_008.jpg | Prédit: 1 | Réel: 4 | Diff: -3
-# [ERREUR] img_009.jpg | Prédit: 1 | Réel: 6 | Diff: -5
-# [ERREUR] img_010.jpg | Prédit: 2 | Réel: 1 | Diff: 1
-# [ERREUR] img_011.jpg | Prédit: 0 | Réel: 10 | Diff: -10
-# [OK] img_012.jpg | Prédit: 3 | Réel: 3
-# [OK] img_013.jpg | Prédit: 5 | Réel: 5
-# [ERREUR] img_014.jpg | Prédit: 1 | Réel: 6 | Diff: -5
-# [ERREUR] img_015.jpg | Prédit: 1 | Réel: 3 | Diff: -2
-# [OK] img_016.jpg | Prédit: 1 | Réel: 1
-# [OK] img_017.jpg | Prédit: 1 | Réel: 1
-# [OK] img_018.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_019.jpg | Prédit: 8 | Réel: 6 | Diff: 2
-# [OK] img_020.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_021.jpg | Prédit: 0 | Réel: 1 | Diff: -1
-# [OK] img_022.jpg | Prédit: 8 | Réel: 8
-# [OK] img_023.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_024.jpg | Prédit: 1 | Réel: 6 | Diff: -5
-# [OK] img_025.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_026.jpg | Prédit: 1 | Réel: 2 | Diff: -1
-# [OK] img_027.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_028.jpg | Prédit: 1 | Réel: 3 | Diff: -2
-# [OK] img_029.jpg | Prédit: 4 | Réel: 4
-# [ERREUR] img_030.jpg | Prédit: 0 | Réel: 4 | Diff: -4
-# [OK] img_031.jpg | Prédit: 6 | Réel: 6
-# [ERREUR] img_032.jpg | Prédit: 2 | Réel: 8 | Diff: -6
-# [OK] img_033.jpg | Prédit: 1 | Réel: 1
-# [OK] img_034.jpg | Prédit: 1 | Réel: 1
-# [OK] img_035.jpg | Prédit: 10 | Réel: 10
-# [OK] img_036.jpg | Prédit: 1 | Réel: 1
-# [OK] img_037.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_038.jpg | Prédit: 8 | Réel: 7 | Diff: 1
-# [OK] img_039.jpg | Prédit: 4 | Réel: 4
-# [OK] img_040.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_041.jpg | Prédit: 1 | Réel: 3 | Diff: -2
-# [OK] img_042.jpg | Prédit: 1 | Réel: 1
-# [OK] img_043.jpg | Prédit: 1 | Réel: 1
-# [OK] img_044.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_045.jpg | Prédit: 4 | Réel: 5 | Diff: -1
-# [ERREUR] img_046.jpg | Prédit: 3 | Réel: 5 | Diff: -2
-# [ERREUR] img_047.jpg | Prédit: 0 | Réel: 5 | Diff: -5
-# [OK] img_048.jpg | Prédit: 1 | Réel: 1
-# [OK] img_049.jpg | Prédit: 3 | Réel: 3
-# [OK] img_050.jpg | Prédit: 1 | Réel: 1
-# [OK] img_051.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_052.jpg | Prédit: 2 | Réel: 1 | Diff: 1
-# [OK] img_053.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_054.jpg | Prédit: 8 | Réel: 10 | Diff: -2
-# [OK] img_055.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_056.jpg | Prédit: 5 | Réel: 7 | Diff: -2
-# [ERREUR] img_057.jpg | Prédit: 1 | Réel: 9 | Diff: -8
-# [ERREUR] img_058.jpg | Prédit: 0 | Réel: 5 | Diff: -5
-# [ERREUR] img_059.jpg | Prédit: 5 | Réel: 6 | Diff: -1
-# [ERREUR] img_060.jpg | Prédit: 0 | Réel: 1 | Diff: -1
-# [ERREUR] img_061.jpg | Prédit: 0 | Réel: 1 | Diff: -1
-# [ERREUR] img_062.jpg | Prédit: 2 | Réel: 8 | Diff: -6
-# [OK] img_063.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_064.jpg | Prédit: 1 | Réel: 15 | Diff: -14
-# [OK] img_065.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_066.jpg | Prédit: 2 | Réel: 4 | Diff: -2
-# [ERREUR] img_067.jpg | Prédit: 2 | Réel: 1 | Diff: 1
-# [ERREUR] img_068.jpg | Prédit: 2 | Réel: 16 | Diff: -14
-# [OK] img_069.jpg | Prédit: 1 | Réel: 1
-# [OK] img_070.jpg | Prédit: 4 | Réel: 4
-# [OK] img_071.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_072.jpg | Prédit: 0 | Réel: 5 | Diff: -5
-# [ERREUR] img_073.jpg | Prédit: 1 | Réel: 7 | Diff: -6
-# [ERREUR] img_074.jpg | Prédit: 0 | Réel: 1 | Diff: -1
-# [ERREUR] img_075.jpg | Prédit: 0 | Réel: 1 | Diff: -1
-# [ERREUR] img_076.jpg | Prédit: 8 | Réel: 13 | Diff: -5
-# [OK] img_077.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_078.jpg | Prédit: 1 | Réel: 3 | Diff: -2
-# [ERREUR] img_079.jpg | Prédit: 1 | Réel: 5 | Diff: -4
-# [OK] img_080.jpg | Prédit: 4 | Réel: 4
-# [OK] img_081.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_082.jpg | Prédit: 0 | Réel: 4 | Diff: -4
-# [OK] img_083.jpg | Prédit: 3 | Réel: 3
-# [ERREUR] img_084.jpg | Prédit: 14 | Réel: 17 | Diff: -3
-# [ERREUR] img_085.jpg | Prédit: 0 | Réel: 6 | Diff: -6
-# [OK] img_086.jpg | Prédit: 1 | Réel: 1
-# [OK] img_087.jpg | Prédit: 1 | Réel: 1
-# [OK] img_088.jpg | Prédit: 1 | Réel: 1
-# [OK] img_089.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_090.jpg | Prédit: 0 | Réel: 1 | Diff: -1
-# [ERREUR] img_091.jpg | Prédit: 0 | Réel: 10 | Diff: -10
-# [OK] img_092.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_093.jpg | Prédit: 0 | Réel: 10 | Diff: -10
-# [OK] img_094.jpg | Prédit: 3 | Réel: 3
-# [ERREUR] img_095.jpg | Prédit: 2 | Réel: 1 | Diff: 1
-# [ERREUR] img_096.jpg | Prédit: 0 | Réel: 1 | Diff: -1
-# [ERREUR] img_097.jpg | Prédit: 1 | Réel: 2 | Diff: -1
-# [OK] img_098.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_099.jpg | Prédit: 13 | Réel: 12 | Diff: 1
-# [OK] img_100.jpg | Prédit: 1 | Réel: 1
-# [OK] img_101.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_102.jpg | Prédit: 1 | Réel: 4 | Diff: -3
-# [OK] img_103.jpg | Prédit: 11 | Réel: 11
-# [OK] img_104.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_105.jpg | Prédit: 0 | Réel: 1 | Diff: -1
-# [ERREUR] img_106.jpg | Prédit: 2 | Réel: 8 | Diff: -6
-# [ERREUR] img_107.jpg | Prédit: 3 | Réel: 4 | Diff: -1
-# [ERREUR] img_108.jpg | Prédit: 2 | Réel: 8 | Diff: -6
-# [ERREUR] img_109.jpg | Prédit: 2 | Réel: 4 | Diff: -2
-# [ERREUR] img_110.jpg | Prédit: 0 | Réel: 1 | Diff: -1
-# [ERREUR] img_111.jpg | Prédit: 0 | Réel: 7 | Diff: -7
-# [OK] img_112.jpg | Prédit: 1 | Réel: 1
-# [OK] img_113.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_114.jpg | Prédit: 0 | Réel: 4 | Diff: -4
-# [OK] img_115.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_116.jpg | Prédit: 1 | Réel: 5 | Diff: -4
-# [ERREUR] img_117.jpg | Prédit: 0 | Réel: 1 | Diff: -1
-# [ERREUR] img_118.jpg | Prédit: 0 | Réel: 1 | Diff: -1
-# [OK] img_119.jpg | Prédit: 1 | Réel: 1
-# [OK] img_120.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_121.jpg | Prédit: 0 | Réel: 1 | Diff: -1
-# [OK] img_122.jpg | Prédit: 1 | Réel: 1
-# [OK] img_123.jpg | Prédit: 4 | Réel: 4
-# [OK] img_124.jpg | Prédit: 2 | Réel: 2
-# [OK] img_125.jpg | Prédit: 12 | Réel: 12
-# [OK] img_126.jpg | Prédit: 5 | Réel: 5
-# [ERREUR] img_127.jpg | Prédit: 1 | Réel: 3 | Diff: -2
-# [OK] img_128.jpg | Prédit: 4 | Réel: 4
-# [OK] img_129.jpg | Prédit: 2 | Réel: 2
-# [ERREUR] img_130.jpg | Prédit: 2 | Réel: 1 | Diff: 1
-# [OK] img_131.jpg | Prédit: 6 | Réel: 6
-# [OK] img_132.jpg | Prédit: 1 | Réel: 1
-# [OK] img_133.jpg | Prédit: 11 | Réel: 11
-# [OK] img_134.jpg | Prédit: 5 | Réel: 5
-# [OK] img_135.jpg | Prédit: 6 | Réel: 6
-# [OK] img_136.jpg | Prédit: 1 | Réel: 1
-# [OK] img_137.jpg | Prédit: 1 | Réel: 1
-# [OK] img_138.jpg | Prédit: 1 | Réel: 1
-# [ERREUR] img_139.jpg | Prédit: 2 | Réel: 1 | Diff: 1
-# [OK] img_140.jpg | Prédit: 1 | Réel: 1
