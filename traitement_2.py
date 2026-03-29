@@ -5,33 +5,19 @@ import numpy as np
 
 
 # =============================================================================
-# PIPELINE GLOBAL DU PROGRAMME
+# PIPELINE GLOBAL DU PROGRAMME (MVP)
 # =============================================================================
-#
-# 
 #
 # Chaîne globale de traitement :
 # ------------------------------
-# 1) lire l'image proprement et la normaliser (mettre ses valeurs de pixels dans une échelle standard pour faciliter les calculs)
-# 2) éventuellement la redimensionner pour réduire le coût de calcul (parce qu’on traite moins de pixels)
-# 3) Convertit RGB en HSL pour faire la détection à partir de la saturation (HSL)
-# 4) Convertit en niveaux de gris avec la formule de luminance
-# 4) lisser l'image avec un flou gaussien
-# 5) segmenter automatiquement avec Otsu
-# 6) nettoyer le masque avec une ouverture morphologique binaire
-# 7) extraire les composantes connexes
-# 8) mesurer leur forme (aire, circularité, remplissage, bbox, bord)
-# 9) estimer le nombre de pièces à partir de ces composantes
-# 10) lancer une détection secondaire spéciale "une seule pièce"
-# 11) appliquer des règles correctives finales
-#
-#
-# Exemples de cas difficiles que ce pipeline essaie de mieux gérer :
-# ------------------------------------------------------------------
-# - 2 pièces collées -> peuvent former une seule grosse composante
-# - 1 seule pièce brillante -> peut être découpée en plusieurs régions
-# - objet  au bord -> ne doit pas être compté
-# - image très grande -> coût de calcul plus élevé si on ne redimensionne pas
+# 1) lire l'image proprement et la normaliser (redimensionner eventuellement)
+# 2) Convertit RGB en HSL pour faire la détection à partir de la saturation (HSL)
+# 3) lisser l'image avec un flou gaussien 
+# 4) segmenter automatiquement avec Otsu
+# 5) nettoyer le masque avec une ouverture morphologique binaire
+# 6) extraire les composantes connexes
+# 7) mesurer leur forme (aire, circularité, remplissage, bbox, bord)
+# 8) estimer le nombre de pièces à partir de ces composantes
 
 # =============================================================================
 # CONFIGURATION & HYPERPARAMÈTRES
@@ -61,48 +47,13 @@ COIN_REFERENCE_ASPECT_MAX = 1.55           # Ratio maximum hauteur/largeur (si >
 MERGE_AREA_RATIO_THRESHOLD = 1.8           # Si aire > 1.8 × aire_typique, compte comme 2 pièces
 MERGE_FILL_MIN = 0.35                      # Remplissage minimum pour détecter fusion
 
-# ===== GROUPE 3 : DÉTECTION SPÉCIALE "UNE SEULE PIÈCE" =====
-# Filet de sécurité : si le pipeline principal doute, on teste si c'est exactement 1 pièce.
-# Critères très stricts pour ne faux-positif.
-#
-# Cours : Semaine 7 - Validation de composantes
-#
-SINGLE_COIN_FILL_MIN = 0.62                # Remplissage minimum pour une pièce unique
-SINGLE_COIN_CIRCULARITY_MIN = 0.40         # Circularité minimum pour une pièce unique
-SINGLE_COIN_ASPECT_RATIO_MIN = 0.78        # Ratio min hauteur/largeur
-SINGLE_COIN_ASPECT_RATIO_MAX = 1.28        # Ratio max hauteur/largeur
-
-# ===== GROUPE 4 : RÈGLES CORRECTIVES (TRÈS GRANDES PIÈCES) =====
-# Si la prédiction principale est très grande mais qu'on observe une seule
-# composante énorme et très circulaire, on corrige à 1.
-#
-# Cours : Semaine 7-8 - Analyse statistique des composantes
-#
-CORRECTION_LARGE_CIRCULARITY_MIN = 0.48    # Circularité pour très grande pièce
-CORRECTION_LARGE_FILL_MIN = 0.68           # Remplissage pour très grande pièce
-CORRECTION_LARGE_AREA_MULTIPLIER = 8.0     # Doit être > 8× aire typique
-
-# ===== GROUPE 5 : RÈGLES CORRECTIVES (COMPOSANTES RARES) =====
-# Si prediction est très grande mais peu de composantes, peut être 1 grosse pièce.
-#
-# Cours : Semaine 7 - Statistiques sur les composantes
-#
-CORRECTION_RARE_CIRCULARITY_MIN = 0.55     # Circularité stricte
-CORRECTION_RARE_FILL_MIN = 0.72            # Remplissage strict
-
-# ===== GROUPE 6 : PARAMÈTRES SYSTÈME =====
-# Paramètres de performance et système, pas liés à la détection mathématique.
-#
-MAX_IMAGE_DIMENSION = 520                  # Redimensionner images > 520 pixels (performance)
-
 
 # =============================================================================
 # LECTURE ET NORMALISATION DE L'IMAGE
 # =============================================================================
 def lire_image_rgb(chemin_image):
     """
-    Lit une image depuis le disque, la convertit dans un format RGB propre,
-    puis la redimensionne si elle est trop grande.
+    Lit une image depuis le disque et la convertit dans un format RGB propre.
     
     COURS : Semaine 1-2 - Représentation des images numériques
     --------------------------------------------------------
@@ -117,7 +68,6 @@ def lire_image_rgb(chemin_image):
     2) si l'image est en niveaux de gris (2D), la convertit en RGB (pas tres utile mais on c jms)
     3) si l'image a un canal alpha (RGBA), on enlève alpha (pas tres utile ais on jms)
     4) si l'image n'est pas en uint8, on la convertit en [0,255] uint8
-    5) si l'image est trop grande, on la redimensionne et avec interpolation bilinéaire horizontale puis verticale 
 
     Pourquoi cette fonction est importante :
     ---------------------------------------
@@ -164,141 +114,12 @@ def lire_image_rgb(chemin_image):
     if image.dtype != np.uint8:
         image = np.clip(np.rint(image * 255.0), 0, 255).astype(np.uint8)
 
-    hauteur, largeur = image.shape[:2]
-
-    # Calcul de l'échelle de redimensionnement.
-    #
-    # echelle <= 1 :
-    # - si l'image est petite, echelle = 1 -> on ne change rien
-    # - si l'image est grande, echelle < 1 -> on réduit
-    echelle = min(1.0, MAX_IMAGE_DIMENSION / max(largeur, hauteur))
-
-    # Redimensionnement si nécessaire.
-    if echelle < 1.0:
-        image = redimensionner_bilineaire(
-            image,
-            max(1, int(round(hauteur * echelle))),
-            max(1, int(round(largeur * echelle))),
-        )
-
     return image
-
-
-import numpy as np
-
-# =============================================================================
-# REDIMENSIONNEMENT BILINÉAIRE
-# =============================================================================
-def redimensionner_bilineaire(image, nouvelle_hauteur, nouvelle_largeur):
-    """
-    Redimensionne l'image par interpolation bilinéaire.
-
-    Notion d'interpolation :
-    ------------------------
-    Quand on change la taille d'une image, les nouveaux pixels n'existent pas
-    dans l'image d'origine. Il faut donc "inventer" leur valeur.
-    L'interpolation donne une règle pour cela.
-
-    Interpolation bilinéaire :
-    --------------------------
-    Pour chaque pixel de sortie, on regarde les 4 pixels les plus proches
-    dans l'image d'origine :
-    - haut gauche
-    - haut droite
-    - bas gauche
-    - bas droite
-
-    Puis on fait une moyenne pondérée selon la position réelle du point.
-
-    Pourquoi c'est mieux que le "plus proche voisin" :
-    --------------------------------------------------
-    Le plus proche voisin donne souvent un rendu brutal, avec effet d'escalier.
-    L'interpolation bilinéaire donne des transitions plus douces.
-
-    Exemple :
-    ---------
-    Si entre deux pixels on a 10 et 30,
-    un pixel intermédiaire peut devenir environ 20,
-    au lieu d'être brutalement 10 ou 30.
-    
-    Notre exemple (L'analogie de la mosaïque) :
-    -------------------------------------------
-    Imaginez l'ancienne image comme une vraie mosaïque de carreaux colorés, et la 
-    nouvelle image comme une feuille transparente avec une nouvelle grille vide que 
-    l'on superpose par-dessus.
-    Pour chaque case vide de la feuille transparente (nouveau pixel), on pose notre doigt. 
-    Ce doigt atterrit "à cheval" sur 4 vieux carreaux de la mosaïque en dessous. 
-    On prend la couleur de ces 4 vieux carreaux, et on la mélange en fonction de 
-    la proximité exacte du doigt avec chacun d'eux pour peindre la nouvelle case.
-    """
-    hauteur, largeur = image.shape[:2]
-
-    # Si la feuille transparente a exactement la même taille que la mosaïque, 
-    # on fait juste une copie directe.
-    if nouvelle_hauteur == hauteur and nouvelle_largeur == largeur:
-        return image.copy()
-
-    # =========================================================================
-    # ÉTAPE 1 : LA SUPERPOSITION (Où tombent nos doigts ?)
-    # =========================================================================
-    # crée nouvelle_hauteur valeurs uniformes entre 0 et hauteur-1
-    # représentent les positions X et Y dans l’image source correspondant aux lignes de sortie
-    y = np.linspace(0, hauteur - 1, nouvelle_hauteur, dtype=np.float32)
-    x = np.linspace(0, largeur - 1, nouvelle_largeur, dtype=np.float32)
-    # Crée une grille 2D de coordonnées (xx, yy) pour chaque pixel de sortie
-    xx, yy = np.meshgrid(x, y)
-
-    # =========================================================================
-    # ÉTAPE 2 : IDENTIFIER LES 4 VIEUX CARREAUX SOUS CHAQUE DOIGT
-    # =========================================================================
-    # 'floor' (arrondi vers le bas) trouve le vieux carreau en Haut à Gauche.
-    x0 = np.floor(xx).astype(np.int32)
-    y0 = np.floor(yy).astype(np.int32)
-
-    # On ajoute +1 pour trouver les carreaux de droite du bas.
-    # 'clip' empêche de chercher un carreau qui n'existe pas en dehors de la table.
-    x1 = np.clip(x0 + 1, 0, largeur - 1)
-    y1 = np.clip(y0 + 1, 0, hauteur - 1)
-
-    # =========================================================================
-    # ÉTAPE 3 : CALCULER LA PROPORTION DE MÉLANGE (Le poids)
-    # =========================================================================
-    # On mesure à quel point notre doigt est décalé par rapport au carreau Haut-Gauche.
-    # wx = 0.8 signifie qu'on est très proche de la droite (à 80%).
-    wx = xx - x0
-    wy = yy - y0
-
-    image = image.astype(np.float32)
-
-    # =========================================================================
-    # ÉTAPE 4 : PRENDRE LA PEINTURE DES 4 VIEUX CARREAUX
-    # =========================================================================
-    haut_gauche = image[y0, x0]
-    haut_droite = image[y0, x1]
-    bas_gauche = image[y1, x0]
-    bas_droite = image[y1, x1]
-
-    # =========================================================================
-    # ÉTAPE 5 : LE MÉLANGE DE PEINTURE
-    # =========================================================================
-    # On mélange d'abord la ligne du haut, puis la ligne du bas...
-    haut = haut_gauche * (1.0 - wx)[..., None] + haut_droite * wx[..., None]
-    bas = bas_gauche * (1.0 - wx)[..., None] + bas_droite * wx[..., None]
-
-    # ...puis on mélange ces deux résultats verticalement pour avoir la couleur finale !
-    resultat = haut * (1.0 - wy)[..., None] + bas * wy[..., None]
-
-    # =========================================================================
-    # ÉTAPE 6 : NETTOYAGE ET RENDU
-    # =========================================================================
-    # On arrondit nos mélanges à virgule en nombres entiers (0 à 255) propres.
-    return np.clip(np.rint(resultat), 0, 255).astype(np.uint8)
 
 
 # =============================================================================
 # CONVERSION COULEUR : RGB -> HSL (partiel : luminosité + saturation)
 # =============================================================================
-# la diff ici est que je retourne les 2 saturation et luminosité pas que la saturation
 def rgb_vers_hsl(image_rgb):
     """
     Convertit une image RGB en HSL (Hue, Saturation, Luminosity).
@@ -328,8 +149,6 @@ def rgb_vers_hsl(image_rgb):
     - delta = max - min
     - luminosité = (max + min)/2
     - saturation HSL avec la formule adaptée
-
-    
     """
     image = image_rgb.astype(np.float32) / 255.0
     r = image[..., 0]
@@ -348,50 +167,6 @@ def rgb_vers_hsl(image_rgb):
     saturation[masque] = delta[masque] / (denominateur[masque] + 1e-6)
 
     return luminosite, np.clip(saturation, 0.0, 1.0)
-
-
-# =============================================================================
-# CONVERSION COULEUR : RGB -> GRIS
-# =============================================================================
-def rgb_vers_gris(image_rgb):
-    """
-    Convertit une image RGB en niveaux de gris normalisés entre 0 et 1.
-    
-    COURS : semaine 3 - Conversion en niveaux de gris
-    -----------------------------------------------
-    Formule de luminance standard :
-    Gray = 0.299R + 0.587G + 0.114B
-    
-    Ces coefficients reflètent la sensibilité de l'œil humain :
-    - Plus sensible au vert (0.587)
-    - Moins sensible au bleu (0.114)
-    - Sensibilité moyenne au rouge (0.299)
-
-    Pourquoi cette fonction existe alors qu'on a déjà la saturation :
-    -----------------------------------------------------------------
-    Parce qu'une seule représentation ne suffit pas toujours.
-    La saturation est bonne dans certains cas,
-    mais pour le cas "une seule pièce", le contraste avec le fond
-    en niveaux de gris peut être plus utile.
-
-    Formule de luminance :
-    ----------------------
-    0.299 R + 0.587 G + 0.114 B
-
-    Pourquoi ces coefficients :
-    ---------------------------
-    L'œil humain est plus sensible au vert qu'au rouge, et moins au bleu.
-    Ce n'est donc pas une moyenne simple (R+G+B)/3. (hadi justif ida saksana)
-
-    Exemple :
-    ---------
-    Une pièce métallique peu saturée peut rester bien visible en gris
-    si elle contraste avec le fond.
-    """
-    image = image_rgb.astype(np.float32)
-    return (
-        0.299 * image[..., 0] + 0.587 * image[..., 1] + 0.114 * image[..., 2]
-    ) / 255.0
 
 
 # =============================================================================
@@ -516,13 +291,6 @@ def convolution_1d_lignes(image, noyau):
     qui sont très complexes à justifier. Le nouveau code utilise np.convolve qui 
     traduit exactement la combinaison linéaire vue en cours (Semaine 8).
     """
-    # ----- ANCIEN CODE GARDÉ EN COMMENTAIRE -----
-    # pad = len(noyau) // 2
-    # image_pad = np.pad(image, ((0, 0), (pad, pad)), mode="edge")
-    # fenetres = np.lib.stride_tricks.sliding_window_view(image_pad, len(noyau), axis=1)
-    # return np.einsum("ijk,k->ij", fenetres, noyau[::-1], optimize=True)
-    # ---------------------------------------------
-
     return np.apply_along_axis(
     # Fonction appliquée à chaque ligne de l'image
     lambda ligne: np.convolve(
@@ -530,13 +298,10 @@ def convolution_1d_lignes(image, noyau):
         noyau,            # filtre (poids de convolution)
         mode='same'       # conserve la même taille que la ligne d'origine
     ),
-    
     axis=1,              # 1 = on parcourt les lignes (horizontalement)
-    
     arr=image            # image 2D (matrice de pixels)
 )
     
-
 
 def convolution_1d_colonnes(image, noyau):
     """
@@ -544,13 +309,6 @@ def convolution_1d_colonnes(image, noyau):
 
     On applique maintenant le noyau sur les colonnes.
     """
-    # ----- ANCIEN CODE GARDÉ EN COMMENTAIRE -----
-    # pad = len(noyau) // 2
-    # image_pad = np.pad(image, ((pad, pad), (0, 0)), mode="edge")
-    # fenetres = np.lib.stride_tricks.sliding_window_view(image_pad, len(noyau), axis=0)
-    # return np.einsum("ijk,k->ij", fenetres, noyau[::-1], optimize=True)
-    # ---------------------------------------------
-    
     return np.apply_along_axis(
     # Applique une fonction sur chaque colonne de l'image
     lambda colonne: np.convolve(
@@ -558,9 +316,7 @@ def convolution_1d_colonnes(image, noyau):
         noyau,          # filtre (poids de convolution)
         mode='same'     # conserve la même taille que la colonne d'origine
     ),
-
     axis=0,             # 0 = on parcourt les colonnes (verticalement)
-    
     arr=image           # image 2D (matrice de pixels)
 )
 
@@ -1069,7 +825,6 @@ def estimer_nombre_depuis_composantes(composantes):
     PROBLÈME À RÉSOUDRE :
     Une composante connexe ≠ une pièce dans 100% des cas :
     - Cas 1 : Deux pièces qui se touchent → 1 seule composante (sous-comptage)
-    - Cas 2 : Une pièce brillante → 2-3 régions (sur-comptage)
     
     STRATÉGIE (exemple seuil + ratio) :
     1. Identifier des \"pièces de référence\" :
@@ -1250,124 +1005,6 @@ def detection_principale(image_rgb, taille_flou):
 
 
 # =============================================================================
-# DÉTECTION SPÉCIALE : CAS "UNE SEULE PIÈCE"
-# =============================================================================
-def detection_piece_unique(image_rgb):
-    """
-    Détection spécialisée : \"Y a-t-il probablement exactement 1 pièce ?\"
-    
-    COURS : Week 7 - Validation & stratégies de détection
-    =====================================================
-    
-    BUT : Filet de sécurité si la détection principale doute
-    
-    Cas où c'est utile :
-    - Pièce unique mal segmentée par voie saturation → prédiction 0 ou 4
-    - Pièce brillante qui crée plusieurs régions → sur-comptage
-    
-    STRATÉGIE ALTERNATIVE (Contraste avec fond) :
-    
-    Au lieu d'utiliser la saturation :
-    1. Convertir en niveaux de gris (Week 3)
-    2. Estimer la couleur du fond (médiane des bords)
-    3. Soustraire le fond à l'image
-    4. Déterminer où la différence est grande
-    
-    Cette approche :
-    - Déteste les reflets (très différents du fond)
-    - Déteste les zones ombragées (différentes du fond)
-    - Isole mieux une pièce unique sur fond assez uniforme
-    
-    CRITÈRES TRÈS STRICTS (pour éviter les faux positifs) :
-    - remplissage >= SINGLE_COIN_FILL_MIN
-    - circularité >= SINGLE_COIN_CIRCULARITY_MIN  
-    - ratio hauteur/largeur dans [SINGLE_COIN_ASPECT_RATIO_MIN, MAX]
-    
-    Pourquoi la médiane des bords pour le fond :
-    -------------------------------------
-    La détection principale peut parfois :
-    - prédire 0 alors qu'il y a 1 pièce
-    - ou prédire 4 alors qu'il n'y a qu'une seule pièce mal segmentée
-
-    Cette fonction sert donc de filet de sécurité.
-
-    Pipeline détaillé :
-    -------------------
-    1) conversion en gris
-    2) estimation du fond à partir des bords
-    3) soustraction au fond
-    4) flou gaussien
-    5) seuillage d'Otsu
-    6) ouverture binaire
-    7) extraction des composantes utiles
-    8) filtrage strict de candidats plausibles
-    9) si on trouve exactement un candidat -> True
-
-    Pourquoi la soustraction au fond :
-    ----------------------------------
-    Si le fond est assez uniforme, alors :
-    - les pixels du fond sont proches de "fond"
-    - la pièce diffère plus fortement
-
-    Exemple :
-    ---------
-    fond = 0.7
-    pixel fond = 0.72 -> différence = 0.02
-    pixel pièce = 0.35 -> différence = 0.35
-
-    Donc la pièce ressort.
-
-    Pourquoi prendre la médiane des bords :
-    ---------------------------------------
-    On suppose que le fond est visible sur les bords de l'image.
-    La médiane est robuste aux petites perturbations.
-
-    Pourquoi des critères stricts à la fin :
-    ----------------------------------------
-    On veut éviter de conclure trop facilement qu'il y a une seule pièce.
-    On impose donc :
-    - remplissage élevé
-    - circularité correcte
-    - bbox proche d'un carré
-    """
-    gris = rgb_vers_gris(image_rgb)
-
-    marge = max(8, int(round(min(gris.shape) * 0.03)))
-    bord = np.concatenate(
-        [
-            gris[:marge, :].ravel(),
-            gris[-marge:, :].ravel(),
-            gris[:, :marge].ravel(),
-            gris[:, -marge:].ravel(),
-        ]
-    )
-    fond = float(np.median(bord))
-
-    difference = np.abs(gris - fond)
-    difference_floue = flou_gaussien(difference, max(5, marge | 1))
-    seuil = max(0.08, seuil_otsu(difference_floue))
-    masque = ouverture_binaire(difference_floue > seuil, 5)
-
-    aire_image = image_rgb.shape[0] * image_rgb.shape[1]
-    aire_min = max(600, int(aire_image * 0.003))
-    aire_max = int(aire_image * 0.30)
-    composantes = extraire_composantes_utiles(masque, aire_min, aire_max)
-
-    # Utilisation des hyperparamètres
-    candidates = [
-        comp
-        for comp in composantes
-        if comp["remplissage"] >= SINGLE_COIN_FILL_MIN
-        and comp["circularite"] >= SINGLE_COIN_CIRCULARITY_MIN
-        and SINGLE_COIN_ASPECT_RATIO_MIN
-        <= comp["hauteur_bbox"] / max(1, comp["largeur_bbox"])
-        <= SINGLE_COIN_ASPECT_RATIO_MAX
-    ]
-
-    return len(candidates) == 1
-
-
-# =============================================================================
 # FONCTION PRINCIPALE : COMPTER LES PIÈCES
 # =============================================================================
 def compter_pieces(chemin_image, taille_flou=(7, 7)):
@@ -1393,118 +1030,16 @@ def compter_pieces(chemin_image, taille_flou=(7, 7)):
     2. DÉTECTION PRINCIPALE
        ├─ Voie saturation (robuste aux ombres)
        ├─ Applique tout le pipeline Weeks 1-8
-       └─ Retourne : prédiction + composantes détaillées
+       └─ Retourne : prédiction
        
-    3. DÉTECTION SECONDAIRE (Filet de sécurité)
-       ├─ Voie contraste gris (alternative)
-       ├─ Cherche si exactement 1 pièce probable
-       └─ Retourne : booléen True/False
-       
-    4. RÈGLES CORRECTIVES (Post-traitement)
-       ├─ Règle 1 : Si prédiction >= 4 mais 1 grosse pièce → corrige à 1
-       ├─ Règle 2 : Si prédiction >= 4 mais peu de composantes → corrige à 1
-       └─ Règle 3 : Si détection secondaire positive → applique correction
-       
-    5. SORTIE : nombre final de pièces
-    
-    RAISON DES CORRECTIONS :
-    Une erreur de 4 au lieu de 1 = MAE +3
-    Corriger à 1 = MAE +0
-    → Important pour réduire le MAE (metrics Week 10)
-
-    Étapes globales :
-    -----------------
-    1) lecture et normalisation de l'image
-    2) détection principale
-    3) détection spéciale "une seule pièce"
-    4) règles correctives finales
-    5) retour de la prédiction finale
-
-    Pourquoi cette structure :
-    --------------------------
-    On sépare :
-    - la prédiction principale
-    - la logique de correction
-
-    Cela rend le pipeline plus robuste et plus lisible.
-
-    Idée de la correction finale :
-    ------------------------------
-    Même si la détection principale se trompe,
-    on peut parfois détecter qu'il s'agit en réalité d'une seule pièce
-    à partir de la forme globale observée.
-
-    Exemple :
-    ---------
-    Cas difficile :
-    - vraie valeur = 1
-    - détection principale = 4
-    - mais on observe une seule grande composante très circulaire
-    -> on corrige à 1
-
-    Pourquoi c'est bon pour le MAE :
-    --------------------------------
-    Une erreur de 4 au lieu de 1 donne une erreur absolue de 3.
-    Si on corrige à 1, l'erreur devient 0.
+    3. SORTIE : nombre final de pièces
     """
     image_rgb = lire_image_rgb(chemin_image)
     if image_rgb is None:
         return 0
 
-    prediction_principale, composantes = detection_principale(image_rgb, taille_flou)
-    piece_unique = detection_piece_unique(image_rgb)
+    # Lancement du pipeline principal
+    prediction_principale, _ = detection_principale(image_rgb, taille_flou)
 
-    # Si on a des composantes, on peut appliquer des règles de cohérence globale.
-    if composantes:
-        aires = sorted(comp["area"] for comp in composantes)
-        aire_mediane = float(np.median(aires))
-
-        # On cherche des très grandes composantes bien rondes et bien remplies.
-        #
-        # Idée :
-        # ------
-        # Si la détection principale a beaucoup surcompté,
-        # mais qu'on observe en réalité une seule grande forme circulaire,
-        # cela suggère qu'il y a une seule grosse pièce.
-        
-        # Utilisation des hyperparamètres
-        grandes_pieces_circulaires = [
-            comp
-            for comp in composantes
-            if comp["circularite"] >= CORRECTION_LARGE_CIRCULARITY_MIN
-            and comp["remplissage"] >= CORRECTION_LARGE_FILL_MIN
-            and comp["area"] >= CORRECTION_LARGE_AREA_MULTIPLIER * max(1.0, aire_mediane)
-        ]
-
-        # Règle 1 :
-        # Si la prédiction principale est très grande, mais qu'on voit une seule
-        # énorme composante circulaire, on corrige à 1.
-        if prediction_principale >= 4 and len(grandes_pieces_circulaires) == 1:
-            return 1
-
-        # Règle 2 :
-        # Si la prédiction principale est grande, mais qu'il y a très peu
-        # de composantes et qu'au moins l'une d'elles ressemble fortement à
-        # une pièce, on corrige aussi à 1.
-        
-        # Utilisation des hyperparamètres
-        if (
-            prediction_principale >= 4
-            and len(composantes) <= 2
-            and any(comp["circularite"] >= CORRECTION_RARE_CIRCULARITY_MIN and comp["remplissage"] >= CORRECTION_RARE_FILL_MIN for comp in composantes)
-        ):
-            return 1
-
-    # Règles liées à la détection spéciale "une seule pièce".
-    if piece_unique:
-        # Si la détection principale n'a rien vu, mais que la détection spéciale
-        # voit clairement une seule pièce plausible, on corrige à 1.
-        if prediction_principale == 0:
-            return 1
-
-        # Si la détection principale donne un nombre exagérément grand par rapport
-        # au nombre de composantes, on corrige à 1.
-        if prediction_principale >= 3 * max(1, len(composantes)):
-            return 1
-
+    # Retour direct de la prédiction
     return prediction_principale
