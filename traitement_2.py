@@ -758,11 +758,13 @@ def erosion_binaire(image_binaire, taille):
     taille = max(1, int(taille))
     if taille % 2 == 0:
         taille += 1
+
     pad = taille // 2
     image_pad = np.pad(
         image_binaire.astype(bool), ((pad, pad), (pad, pad)), mode="constant", constant_values=False
     )
     fenetres = np.lib.stride_tricks.sliding_window_view(image_pad, (taille, taille))
+
     return np.all(fenetres, axis=(2, 3))
 
 
@@ -770,7 +772,7 @@ def dilatation_binaire(image_binaire, taille):
     """
     Dilatation binaire (Binary Dilation Morphological Operation).
     
-    COURS : Week 6 - Opérations morphologiques binaires
+    COURS : semaine 6 - Opérations morphologiques binaires
     -------------------------------------------------
     Définition : Un pixel devient blanc (True) SI AU MOINS UN pixel
     dans la fenêtre locale autour de lui est blanc.
@@ -801,11 +803,13 @@ def dilatation_binaire(image_binaire, taille):
     taille = max(1, int(taille))
     if taille % 2 == 0:
         taille += 1
+
     pad = taille // 2
     image_pad = np.pad(
         image_binaire.astype(bool), ((pad, pad), (pad, pad)), mode="constant", constant_values=False
     )
     fenetres = np.lib.stride_tricks.sliding_window_view(image_pad, (taille, taille))
+
     return np.any(fenetres, axis=(2, 3))
 
 
@@ -813,7 +817,7 @@ def ouverture_binaire(image_binaire, taille):
     """
     Ouverture binaire = Érosion suivi de Dilation (Opening Operation).
     
-    COURS : Week 6 - Composition d'opérations morphologiques
+    COURS : semaine 6 - Composition d'opérations morphologiques
     -------------------------------------------------------
     Formule : O = Dilate(Erode(I))
     
@@ -853,7 +857,7 @@ def composantes_connexes(image_binaire):
     Extrait toutes les composantes connexes d'un masque binaire et calcule
     plusieurs descripteurs de forme pour chacune.
     
-    COURS : Week 7 - Analyse d'objets & Composantes connexes
+    COURS : semaine 7 - Analyse d'objets & Composantes connexes
     ==========================================================
     
     DÉFINITIONS :
@@ -1369,9 +1373,6 @@ def detection_piece_unique(image_rgb):
 def compter_pieces(chemin_image, taille_flou=(7, 7)):
     """
     Fonction principale : compte le nombre de pièces dans une image.
-    
-    COURS : Semaines 1-8 - Projet intégré complet
-    =============================================
     
     APERÇU GLOBAL :
     
