@@ -1,6 +1,5 @@
 import math
 from collections import deque
-
 import matplotlib.image as mpimg
 import numpy as np
 
@@ -13,9 +12,10 @@ import numpy as np
 #
 # Chaîne globale de traitement :
 # ------------------------------
-# 1) lire l'image proprement et la normaliser
-# 2) éventuellement la redimensionner pour réduire le coût de calcul
-# 3) faire une détection principale à partir de la saturation (HSL)
+# 1) lire l'image proprement et la normaliser (mettre ses valeurs de pixels dans une échelle standard pour faciliter les calculs)
+# 2) éventuellement la redimensionner pour réduire le coût de calcul (parce qu’on traite moins de pixels)
+# 3) Convertit RGB en HSL pour faire la détection à partir de la saturation (HSL)
+# 4) Convertit en niveaux de gris avec la formule de luminance
 # 4) lisser l'image avec un flou gaussien
 # 5) segmenter automatiquement avec Otsu
 # 6) nettoyer le masque avec une ouverture morphologique binaire
@@ -25,7 +25,6 @@ import numpy as np
 # 10) lancer une détection secondaire spéciale "une seule pièce"
 # 11) appliquer des règles correctives finales
 #
-# 
 #
 # Exemples de cas difficiles que ce pipeline essaie de mieux gérer :
 # ------------------------------------------------------------------
@@ -33,13 +32,6 @@ import numpy as np
 # - 1 seule pièce brillante -> peut être découpée en plusieurs régions
 # - objet  au bord -> ne doit pas être compté
 # - image très grande -> coût de calcul plus élevé si on ne redimensionne pas
-#
-# Pourquoi ce pipeline améliore le MAE :
-# --------------------------------------
-# Le MAE mesure l'erreur absolue moyenne entre prédiction et vérité terrain.
-# Les grosses erreurs (par exemple prédire 4 au lieu de 1) augmentent beaucoup
-# le MAE. Ici, le pipeline ajoute des mécanismes pour éviter ce type d'erreurs.
-# =============================================================================
 
 # =============================================================================
 # CONFIGURATION & HYPERPARAMÈTRES
@@ -47,15 +39,13 @@ import numpy as np
 # [RÈGLE D'OR] : Toutes les valeurs ci-dessous ont été réglées empiriquement
 # sur la base de VALIDATION UNIQUEMENT, sans regarder la base de test.
 # Cette approche garantit que les résultats finaux ne sont pas biaisés.
-#
-# Source : Voir "ALIGNMENT_REPORT.md" et "IMPROVEMENTS_RECOMMENDATIONS.md"
 # =============================================================================
 
 # ===== GROUPE 1 : DESCRIPTEURS DE FORMES POUR COIN DE RÉFÉRENCE =====
 # Utilisé pour identifier une composante connexe qui ressemble vraiment à une pièce.
 # Une pièce "de référence" nous permet d'estimer la taille typique d'une pièce.
 #
-# Cours : Week 7 - Descripteurs d'objets et composantes connexes
+# Cours : Semaine 7 - Descripteurs d'objets et composantes connexes
 #
 COIN_REFERENCE_CIRCULARITY_MIN = 0.45      # Circularité minimale (1.0 = cercle parfait)
 COIN_REFERENCE_FILL_MIN = 0.45             # Remplissage minimum (aire / bbox)
@@ -66,7 +56,7 @@ COIN_REFERENCE_ASPECT_MAX = 1.55           # Ratio maximum hauteur/largeur (si >
 # Quand deux pièces se touchent, elles forment une seule composante connexe.
 # Ces paramètres permettent de détecter et de compter ces cas.
 #
-# Cours : Week 7 - Analyse d'objets connexes
+# Cours : Semaine 7 - Analyse d'objets connexes
 #
 MERGE_AREA_RATIO_THRESHOLD = 1.8           # Si aire > 1.8 × aire_typique, compte comme 2 pièces
 MERGE_FILL_MIN = 0.35                      # Remplissage minimum pour détecter fusion
@@ -75,7 +65,7 @@ MERGE_FILL_MIN = 0.35                      # Remplissage minimum pour détecter 
 # Filet de sécurité : si le pipeline principal doute, on teste si c'est exactement 1 pièce.
 # Critères très stricts pour ne faux-positif.
 #
-# Cours : Week 7 - Validation de composantes
+# Cours : Semaine 7 - Validation de composantes
 #
 SINGLE_COIN_FILL_MIN = 0.62                # Remplissage minimum pour une pièce unique
 SINGLE_COIN_CIRCULARITY_MIN = 0.40         # Circularité minimum pour une pièce unique
@@ -86,7 +76,7 @@ SINGLE_COIN_ASPECT_RATIO_MAX = 1.28        # Ratio max hauteur/largeur
 # Si la prédiction principale est très grande mais qu'on observe une seule
 # composante énorme et très circulaire, on corrige à 1.
 #
-# Cours : Week 7-8 - Analyse statistique des composantes
+# Cours : Semaine 7-8 - Analyse statistique des composantes
 #
 CORRECTION_LARGE_CIRCULARITY_MIN = 0.48    # Circularité pour très grande pièce
 CORRECTION_LARGE_FILL_MIN = 0.68           # Remplissage pour très grande pièce
@@ -95,7 +85,7 @@ CORRECTION_LARGE_AREA_MULTIPLIER = 8.0     # Doit être > 8× aire typique
 # ===== GROUPE 5 : RÈGLES CORRECTIVES (COMPOSANTES RARES) =====
 # Si prediction est très grande mais peu de composantes, peut être 1 grosse pièce.
 #
-# Cours : Week 7 - Statistiques sur les composantes
+# Cours : Semaine 7 - Statistiques sur les composantes
 #
 CORRECTION_RARE_CIRCULARITY_MIN = 0.55     # Circularité stricte
 CORRECTION_RARE_FILL_MIN = 0.72            # Remplissage strict
@@ -104,9 +94,6 @@ CORRECTION_RARE_FILL_MIN = 0.72            # Remplissage strict
 # Paramètres de performance et système, pas liés à la détection mathématique.
 #
 MAX_IMAGE_DIMENSION = 520                  # Redimensionner images > 520 pixels (performance)
-                                           # Raison : traiter une grande image coûte cher
-                                           # Ex: 2000×1500 = 3M pixels → trop lent
-                                           # Ramenée à 520px : calculs ~30× plus rapides
 
 
 # =============================================================================
@@ -117,7 +104,7 @@ def lire_image_rgb(chemin_image):
     Lit une image depuis le disque, la convertit dans un format RGB propre,
     puis la redimensionne si elle est trop grande.
     
-    COURS : Week 1-2 - Représentation des images numériques
+    COURS : Semaine 1-2 - Représentation des images numériques
     --------------------------------------------------------
     - Modèle mathématique : f(Ω) → X^c
     - Sampling (discrétisation spatiale en pixels)
@@ -162,15 +149,18 @@ def lire_image_rgb(chemin_image):
     except FileNotFoundError:
         return None
 
-    
+    # Si l'image est en niveaux de gris (2D), on la convertit en RGB en empilant les canaux.
+    # Crée une 3e dimension et mets les copies dedans
     if image.ndim == 2:
         image = np.stack([image, image, image], axis=2)
 
-   
+   # Si l'image a un canal alpha (RGBA), on enlève le canal alpha pour ne garder que RGB.
+   # Garde toutes les lignes et colonnes, mais seulement les 3 premiers canaux
     if image.shape[2] > 3:
         image = image[..., :3]
 
-
+    # Si l'image n'est pas en uint8, on la convertit en [0,255] uint8.
+    # rint arrondi à l'entier le plus proche, clip pour éviter les débordements, puis convertit en uint8
     if image.dtype != np.uint8:
         image = np.clip(np.rint(image * 255.0), 0, 255).astype(np.uint8)
 
@@ -194,10 +184,11 @@ def lire_image_rgb(chemin_image):
     return image
 
 
+import numpy as np
+
 # =============================================================================
 # REDIMENSIONNEMENT BILINÉAIRE
 # =============================================================================
-#elle permet d'ameliorer les perf (plus rapide)
 def redimensionner_bilineaire(image, nouvelle_hauteur, nouvelle_largeur):
     """
     Redimensionne l'image par interpolation bilinéaire.
@@ -229,51 +220,78 @@ def redimensionner_bilineaire(image, nouvelle_hauteur, nouvelle_largeur):
     Si entre deux pixels on a 10 et 30,
     un pixel intermédiaire peut devenir environ 20,
     au lieu d'être brutalement 10 ou 30.
+    
+    Notre exemple (L'analogie de la mosaïque) :
+    -------------------------------------------
+    Imaginez l'ancienne image comme une vraie mosaïque de carreaux colorés, et la 
+    nouvelle image comme une feuille transparente avec une nouvelle grille vide que 
+    l'on superpose par-dessus.
+    Pour chaque case vide de la feuille transparente (nouveau pixel), on pose notre doigt. 
+    Ce doigt atterrit "à cheval" sur 4 vieux carreaux de la mosaïque en dessous. 
+    On prend la couleur de ces 4 vieux carreaux, et on la mélange en fonction de 
+    la proximité exacte du doigt avec chacun d'eux pour peindre la nouvelle case.
     """
     hauteur, largeur = image.shape[:2]
 
-    # Si les dimensions ne changent pas, on renvoie une copie.
+    # Si la feuille transparente a exactement la même taille que la mosaïque, 
+    # on fait juste une copie directe.
     if nouvelle_hauteur == hauteur and nouvelle_largeur == largeur:
         return image.copy()
 
-    # Coordonnées de sortie ramenées dans le repère de l'image d'origine.
-    #
-    # y et x contiennent les positions réelles à échantillonner dans
-    # l'image d'origine.
+    # =========================================================================
+    # ÉTAPE 1 : LA SUPERPOSITION (Où tombent nos doigts ?)
+    # =========================================================================
+    # crée nouvelle_hauteur valeurs uniformes entre 0 et hauteur-1
+    # représentent les positions X et Y dans l’image source correspondant aux lignes de sortie
     y = np.linspace(0, hauteur - 1, nouvelle_hauteur, dtype=np.float32)
     x = np.linspace(0, largeur - 1, nouvelle_largeur, dtype=np.float32)
+    # Crée une grille 2D de coordonnées (xx, yy) pour chaque pixel de sortie
     xx, yy = np.meshgrid(x, y)
 
-    # Coordonnées entières du coin supérieur gauche.
+    # =========================================================================
+    # ÉTAPE 2 : IDENTIFIER LES 4 VIEUX CARREAUX SOUS CHAQUE DOIGT
+    # =========================================================================
+    # 'floor' (arrondi vers le bas) trouve le vieux carreau en Haut à Gauche.
     x0 = np.floor(xx).astype(np.int32)
     y0 = np.floor(yy).astype(np.int32)
 
-    # Coordonnées du pixel voisin à droite / en bas.
+    # On ajoute +1 pour trouver les carreaux de droite du bas.
+    # 'clip' empêche de chercher un carreau qui n'existe pas en dehors de la table.
     x1 = np.clip(x0 + 1, 0, largeur - 1)
     y1 = np.clip(y0 + 1, 0, hauteur - 1)
 
-    # Poids d'interpolation.
-    #
-    # wx mesure où on est entre x0 et x1.
-    # wy mesure où on est entre y0 et y1.
+    # =========================================================================
+    # ÉTAPE 3 : CALCULER LA PROPORTION DE MÉLANGE (Le poids)
+    # =========================================================================
+    # On mesure à quel point notre doigt est décalé par rapport au carreau Haut-Gauche.
+    # wx = 0.8 signifie qu'on est très proche de la droite (à 80%).
     wx = xx - x0
     wy = yy - y0
 
     image = image.astype(np.float32)
 
-    # Les 4 voisins.
+    # =========================================================================
+    # ÉTAPE 4 : PRENDRE LA PEINTURE DES 4 VIEUX CARREAUX
+    # =========================================================================
     haut_gauche = image[y0, x0]
     haut_droite = image[y0, x1]
     bas_gauche = image[y1, x0]
     bas_droite = image[y1, x1]
 
-    # Interpolation horizontale sur la ligne du haut et sur la ligne du bas.
+    # =========================================================================
+    # ÉTAPE 5 : LE MÉLANGE DE PEINTURE
+    # =========================================================================
+    # On mélange d'abord la ligne du haut, puis la ligne du bas...
     haut = haut_gauche * (1.0 - wx)[..., None] + haut_droite * wx[..., None]
     bas = bas_gauche * (1.0 - wx)[..., None] + bas_droite * wx[..., None]
 
-    # Interpolation verticale entre les deux résultats.
+    # ...puis on mélange ces deux résultats verticalement pour avoir la couleur finale !
     resultat = haut * (1.0 - wy)[..., None] + bas * wy[..., None]
 
+    # =========================================================================
+    # ÉTAPE 6 : NETTOYAGE ET RENDU
+    # =========================================================================
+    # On arrondit nos mélanges à virgule en nombres entiers (0 à 255) propres.
     return np.clip(np.rint(resultat), 0, 255).astype(np.uint8)
 
 
@@ -285,7 +303,7 @@ def rgb_vers_hsl(image_rgb):
     """
     Convertit une image RGB en HSL (Hue, Saturation, Luminosity).
     
-    COURS : Week 3 - Espaces couleur (Color Spaces)
+    COURS : semaine 3 - Espaces couleur (Color Spaces)
     -----------------------------------------------
     Convertit RGB (additif, écrans) → HSL (perceptuel, robuste aux ombres)
     Formule mathématique de saturation HSL :
@@ -339,7 +357,7 @@ def rgb_vers_gris(image_rgb):
     """
     Convertit une image RGB en niveaux de gris normalisés entre 0 et 1.
     
-    COURS : Week 3 - Conversion en niveaux de gris
+    COURS : semaine 3 - Conversion en niveaux de gris
     -----------------------------------------------
     Formule de luminance standard :
     Gray = 0.299R + 0.587G + 0.114B
@@ -358,7 +376,7 @@ def rgb_vers_gris(image_rgb):
 
     Formule de luminance :
     ----------------------
-    0.299 R + 0.587 G + 0.114 B (par chatgpt lgq yaeni)
+    0.299 R + 0.587 G + 0.114 B
 
     Pourquoi ces coefficients :
     ---------------------------
@@ -383,7 +401,7 @@ def noyau_gaussien_1d(taille, sigma):
     """
     Crée un noyau gaussien 1D normalisé pour le filtrage.
     
-    COURS : Week 8 - Convolution & Filtrage Gaussien
+    COURS : semaine 8 - Convolution & Filtrage Gaussien
     -----------------------------------------------
     Formule mathématique :
     G(x) = exp(-(x²) / (2σ²))  [normalisé : sum = 1]
@@ -419,12 +437,26 @@ def noyau_gaussien_1d(taille, sigma):
     ----------------------
     plus le flou est étalé.
     """
+
+    # calcul du rayon du noyau (distance du centre aux bords)
     rayon = taille // 2
+
+    # création d’un axe centré sur 0 : ex [-2, -1, 0, 1, 2]
     axe = np.arange(-rayon, rayon + 1, dtype=np.float32)
+
+    # calcul de la gaussienne pour chaque position de l’axe
+    # donne des poids élevés au centre et faibles aux extrémités
     noyau = np.exp(-(axe * axe) / (2.0 * sigma * sigma))
+
+    # somme des valeurs du noyau (avant normalisation)
     somme = np.sum(noyau)
+
+    # normalisation pour que la somme des poids = 1
+    # (évite de modifier la luminosité de l’image lors du filtrage)
     if somme > 0:
         noyau /= somme
+
+    # retourne le noyau 1D prêt à être utilisé en convolution
     return noyau
 
 
@@ -436,7 +468,8 @@ def convolution_1d_lignes(image, noyau):
     -----------------------------------
     Convolution 1D discrète : (f * g)[n] = Σ f[m] * g[n-m]
     
-    Mode 'same' : préserve la taille de l'image (padding aux bords)
+    Mode 'same' : préserve la taille de l'image (padding aux bords) pour que:
+    taille entrée = taille sortie
     
     np.convolve() implémente exactement la formule mathématique du cours,
     pas une approximation ou optimisation en black-box.
@@ -448,7 +481,7 @@ def convolution_1d_lignes(image, noyau):
     - puis une convolution verticale
 
     Cela donne le même résultat qu'une vraie gaussienne 2D,
-    mais plus efficacement.
+    mais plus efficacement et plus rapide.
 
     Notion de fenêtre glissante :
     -----------------------------
@@ -457,17 +490,25 @@ def convolution_1d_lignes(image, noyau):
 
     Exemple sur une ligne :
     -----------------------
-    Ligne = [10, 10, 20, 30, 30]
+    Ligne de pixels= [10, 10, 20, 30, 30]
+    Le noyau= [0.25, 0.5, 0.25]
+    Fenêtre = petit morceau de l’image utilisé localement pour calculer un pixel filtré
     Fenêtre taille 3 :
     - [10, 10, 20]
     - [10, 20, 30]
     - [20, 30, 30]
 
     Ensuite on multiplie cette fenêtre par le noyau puis on somme.
+    10 × 0.25 + 20 × 0.5 + 30 × 0.25
+    = 2.5 + 10 + 7.5
+    = 20
+    Le pixel central (20) est remplacé par une nouvelle valeur (20 ici)
 
     Padding mode="edge" :
     ---------------------
     Aux bords, on prolonge la valeur du bord pour éviter de perdre des pixels.
+    Image originale : [10, 10, 20, 30, 30]
+    On prolonge (padding “edge”) : [10, 10, 10, 20, 30, 30, 30]
     
     [AJOUT POUR LA SOUTENANCE] :
     ----------------------------
@@ -481,8 +522,20 @@ def convolution_1d_lignes(image, noyau):
     # fenetres = np.lib.stride_tricks.sliding_window_view(image_pad, len(noyau), axis=1)
     # return np.einsum("ijk,k->ij", fenetres, noyau[::-1], optimize=True)
     # ---------------------------------------------
+
+    return np.apply_along_axis(
+    # Fonction appliquée à chaque ligne de l'image
+    lambda ligne: np.convolve(
+        ligne,            # une ligne de pixels (1D)
+        noyau,            # filtre (poids de convolution)
+        mode='same'       # conserve la même taille que la ligne d'origine
+    ),
     
-    return np.apply_along_axis(lambda ligne: np.convolve(ligne, noyau, mode='same'), axis=1, arr=image)
+    axis=1,              # 1 = on parcourt les lignes (horizontalement)
+    
+    arr=image            # image 2D (matrice de pixels)
+)
+    
 
 
 def convolution_1d_colonnes(image, noyau):
@@ -498,14 +551,24 @@ def convolution_1d_colonnes(image, noyau):
     # return np.einsum("ijk,k->ij", fenetres, noyau[::-1], optimize=True)
     # ---------------------------------------------
     
-    return np.apply_along_axis(lambda colonne: np.convolve(colonne, noyau, mode='same'), axis=0, arr=image)
+    return np.apply_along_axis(
+    # Applique une fonction sur chaque colonne de l'image
+    lambda colonne: np.convolve(
+        colonne,        # une colonne de pixels (1D vertical)
+        noyau,          # filtre (poids de convolution)
+        mode='same'     # conserve la même taille que la colonne d'origine
+    ),
 
+    axis=0,             # 0 = on parcourt les colonnes (verticalement)
+    
+    arr=image           # image 2D (matrice de pixels)
+)
 
 def flou_gaussien(image, taille):
     """
     Applique un flou gaussien à une image 2D (2D Gaussian filtering).
     
-    COURS : Week 8 - Opérations locales & Filtrage Gaussien
+    COURS : semaine 8 - Opérations locales & Filtrage Gaussien
     -------------------------------------------------------
     Combine deux convolutions 1D séparables pour efficacité.
     C'est une \"opération locale\" : chaque pixel dépend de ses voisins.
@@ -521,7 +584,7 @@ def flou_gaussien(image, taille):
     - le bruit
     - les petites variations locales
     - les détails qui risquent de perturber Otsu
-    comme a dit lobruy
+    comme a dit M. lobry
 
     Étapes :
     --------
@@ -543,8 +606,10 @@ def flou_gaussien(image, taille):
     taille = max(3, int(taille))
     if taille % 2 == 0:
         taille += 1
+
     sigma = max(1.0, taille / 3.0)
     noyau = noyau_gaussien_1d(taille, sigma)
+
     image = image.astype(np.float32)
     image = convolution_1d_lignes(image, noyau)
     return convolution_1d_colonnes(image, noyau)
@@ -569,7 +634,10 @@ def histogramme_u8(image):
     Un pixel 0.5 devient environ 128
     Un pixel 1.0 devient 255
     """
+    # rint arrondi à l'entier le plus proche, clip pour éviter les débordements, puis convertit en uint8
     image_u8 = np.clip(np.rint(image * 255.0), 0, 255).astype(np.uint8)
+    # np.bincount compte le nombre d'occurrences de chaque valeur de pixel (0 à 255)
+    # ravel : aplati l'image 2D en 1D pour que bincount puisse compter tous les pixels
     return np.bincount(image_u8.ravel(), minlength=256).astype(np.float64)
 
 
@@ -577,7 +645,7 @@ def seuil_otsu(image):
     """
     Calcule automatiquement un seuil d'Otsu dans [0,1].
     
-    COURS : Week 5 - Segmentation par seuillage & Algorithme d'Otsu
+    COURS : semaine 5 - Segmentation par seuillage & Algorithme d'Otsu
     ================================================================
     
     PRINCIPE MATHÉMATIQUE :
@@ -634,14 +702,19 @@ def seuil_otsu(image):
     if total == 0:
         return 0.5
 
+    # transformons l'histogramme en probabilités
     probabilites = hist / total
+    # calcul des proportion de pixels jusqu’au niveau de gris i
     cumul_prob = np.cumsum(probabilites)
+    # calcul de la moyenne cumulée des intensités jusqu’au niveau i
     cumul_moy = np.cumsum(probabilites * np.arange(256))
+    # la moyenne totale de l'image (intensité moyenne globale) c'est le dernier élément de cumul_moy
     moyenne_totale = cumul_moy[-1]
 
     variance_inter = (moyenne_totale * cumul_prob - cumul_moy) ** 2
     variance_inter /= cumul_prob * (1.0 - cumul_prob) + 1e-12
 
+    # np.argmax trouve l'indice du seuil qui maximise la variance inter-classes
     seuil = int(np.argmax(variance_inter))
     return seuil / 255.0
 
@@ -653,7 +726,7 @@ def erosion_binaire(image_binaire, taille):
     """
     Érosion binaire (Binary Erosion Morphological Operation).
     
-    COURS : Week 6 - Opérations morphologiques binaires
+    COURS : semaine 6 - Opérations morphologiques binaires
     --------------------------------------------------
     Définition : Un pixel reste blanc (True) SIseul si TOUS les pixels
     dans la fenêtre locale autour de lui sont blancs.

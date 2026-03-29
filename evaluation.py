@@ -4,9 +4,10 @@ from traitement_2 import compter_pieces
 
 def evaluer_modele(dossier_images, fichier_json, taille_flou=(7, 7)):
     """
-    Charge la vérité terrain, exécute l'algorithme et calcule la MAE et la MSE.
+    Charge le JSON de la vérité terrain, exécute l'algorithme "compter_pieces" et calcule la MAE et la MSE.
     """
     # Chargement de la vérité terrain depuis le JSON
+    # with : pour s'assurer que le fichier est correctement fermé après lecture
     with open(fichier_json, 'r') as f:
         verite_terrain = json.load(f)
 
@@ -20,6 +21,7 @@ def evaluer_modele(dossier_images, fichier_json, taille_flou=(7, 7)):
         chemin = os.path.join(dossier_images, nom_fichier)
         
         # Prédiction (yi)
+        # taille_flou : paramètre qui contrôle l'intensité du flou gaussien appliqué à l'image avant d'analyser les pièces.
         prediction = compter_pieces(chemin, taille_flou)
         
         # Vérité terrain (ŷi)
@@ -49,8 +51,10 @@ def evaluer_modele(dossier_images, fichier_json, taille_flou=(7, 7)):
     print("-" * 40)
     # La MAE renseigne directement sur la distance moyenne aux prédictions.
     print(f"MAE (Erreur Absolue Moyenne)     : {mae:.2f}")
+
     # La MSE pénalise lourdement les grosses aberrations.
     print(f"MSE (Erreur Quadratique Moyenne) : {mse:.2f}")
+    
     print(f"Nombre Moyen Réel de Pièces      : {mean_real_amount:.2f}")
     print(f"Pourcentage d'Erreur (MAE/Mean)  : {mae_percentage:.2f}%")
     print("-" * 40)

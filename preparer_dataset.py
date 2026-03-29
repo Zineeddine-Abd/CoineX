@@ -12,7 +12,8 @@ def preparer_et_diviser(dossier_brut, dossier_val, dossier_test, ratio_val=0.7):
 
     # Récupérer toutes les images
     images = [f for f in os.listdir(dossier_brut) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-    random.shuffle(images) # Mélange aléatoire pour éviter les biais
+    # Mélange aléatoire pour éviter les biais
+    random.shuffle(images) 
 
     nb_val = int(len(images) * ratio_val)
     
@@ -48,8 +49,10 @@ def annoter_dossier(dossier_images, chemin_json):
         
         # Afficher l'image avec OpenCV
         img = cv2.imread(chemin_img)
+
         # Redimensionner si l'image est trop grande pour l'écran
         img_affichee = cv2.resize(img, (800, 600)) 
+
         cv2.imshow("Annotation (Regarde ici, tape dans la console !)", img_affichee)
         cv2.waitKey(1) # Force l'affichage de la fenêtre
         
@@ -72,14 +75,14 @@ def annoter_dossier(dossier_images, chemin_json):
     with open(chemin_json, 'w') as f:
         json.dump(verite_terrain, f, indent=4)
         
-    print(f"Fichier {chemin_json} sauvegardé avec succès ! 🎉")
+    print(f"Fichier {chemin_json} sauvegardé avec succès !")
 
 
 # Exécution du Script ---
 if __name__ == "__main__":
-    # 1- Exécute cette ligne UNE SEULE FOIS pour préparer tes dossiers
+    # 1- A EXECUTER UNE SEULE FOIS pour préparer tes dossiers
     preparer_et_diviser("data_brute", "data/validation", "data/test")
     
-    # 2- Ensuite, annote tes deux dossiers très rapidement
+    # 2- Ensuite, on annote tes deux dossiers
     annoter_dossier("data/validation", "data/validation.json")
     annoter_dossier("data/test", "data/test.json")
