@@ -332,9 +332,6 @@ def rgb_vers_hsl(image_rgb):
     
     """
     image = image_rgb.astype(np.float32) / 255.0
-    r = image[..., 0]
-    g = image[..., 1]
-    b = image[..., 2]
 
     maximum = np.max(image, axis=2)
     minimum = np.min(image, axis=2)
@@ -523,18 +520,25 @@ def convolution_1d_lignes(image, noyau):
     # return np.einsum("ijk,k->ij", fenetres, noyau[::-1], optimize=True)
     # ---------------------------------------------
 
+    # COURS Semaine 9 — Padding aux bords de l'image :
+    # np.convolve avec mode='same' applique un ZERO PADDING implicitement.
+    # Cela signifie que les pixels imaginaires en dehors de l'image valent 0.
+    #
+    # Conséquence : les pixels tout au bord de l'image seront légèrement
+    # assombris (effet de vignettage), car la moyenne intègre des zéros.
+    #
+    # Ce n'est pas un problème ici, car on rejette de toute façon les
+    # composantes connexes qui touchent le bord (voir touche_bord dans
+    # composantes_connexes).
     return np.apply_along_axis(
-    # Fonction appliquée à chaque ligne de l'image
-    lambda ligne: np.convolve(
-        ligne,            # une ligne de pixels (1D)
-        noyau,            # filtre (poids de convolution)
-        mode='same'       # conserve la même taille que la ligne d'origine
-    ),
-    
-    axis=1,              # 1 = on parcourt les lignes (horizontalement)
-    
-    arr=image            # image 2D (matrice de pixels)
-)
+        lambda ligne: np.convolve(
+            ligne,        # une ligne de pixels (1D)
+            noyau,        # filtre (poids de convolution)
+            mode='same'   # conserve la même taille + zero padding implicite
+        ),
+        axis=1,           # 1 = on parcourt les lignes (horizontalement)
+        arr=image         # image 2D (matrice de pixels)
+    )
     
 
 
@@ -816,17 +820,17 @@ def dilatation_binaire(image_binaire, taille):
 def ouverture_binaire(image_binaire, taille):
     """
     Ouverture binaire = Érosion suivi de Dilation (Opening Operation).
-    
+
     COURS : semaine 6 - Composition d'opérations morphologiques
     -------------------------------------------------------
     Formule : O = Dilate(Erode(I))
-    
+
     Propriétés mathématiques :
     - Élimine les objets plus petits que la fenêtre structurale
     - Lisse les contours (réduit les oscillations)
     - Conserve les gros objets presque intacts
     - Idempotente : O(O(I)) = O(I)
-    
+
     Cas d'usage :
     - Nettoyage du bruit après seuillage
     - Suppression des petits parasites
@@ -847,6 +851,54 @@ def ouverture_binaire(image_binaire, taille):
     l'ouverture garde surtout la pièce.
     """
     return dilatation_binaire(erosion_binaire(image_binaire, taille), taille)
+
+
+def fermeture_binaire(image_binaire, taille):
+    """
+    Fermeture binaire = Dilatation suivie d'Érosion (Closing Operation).
+
+    COURS : Semaine 10 - Morphologie mathématique (opérations composées)
+    -------------------------------------------------------------------
+    Formule : Fermeture = Erosion( Dilatation(I) )
+
+    C'est l'opération INVERSE de l'ouverture :
+    - L'ouverture  commence par éroder  -> supprime le bruit extérieur
+    - La fermeture commence par dilater -> bouche les trous intérieurs
+
+    Effet visuel :
+    --------------
+    Avant fermeture : un objet avec un petit trou noir à l'intérieur
+    Après fermeture : le trou est bouché, l'objet est solide
+
+    Pourquoi c'est utile pour notre projet (pièces de monnaie) :
+    ------------------------------------------------------------
+    Les pièces métalliques ont souvent des reflets lumineux en leur centre.
+    Ces reflets, très clairs, peuvent être vus comme du "fond" par Otsu et
+    créer un trou blanc à l'intérieur du masque de la pièce.
+
+    Sans fermeture :
+      masque = [1 1 1 1 1]   <- bord de la pièce = blanc (1)
+               [1 1 0 1 1]   <- reflet central    = trou  (0) <- PROBLÈME
+               [1 1 1 1 1]   <- bord de la pièce = blanc (1)
+
+    Avec fermeture :
+      masque = [1 1 1 1 1]
+               [1 1 1 1 1]   <- le trou est rebouché
+               [1 1 1 1 1]
+
+    Ce trou, s'il n'est pas corrigé, peut faire croire à plusieurs
+    composantes connexes au lieu d'une seule -> sur-comptage des pièces.
+
+    Ordre dans le pipeline :
+    ------------------------
+    1. Ouverture  -> supprime les petits points parasites (bruit extérieur)
+    2. Fermeture  -> bouche les petits trous internes (reflets)
+
+    Les deux ensemble donnent un masque propre et solide.
+    """
+    # Dilatation d'abord : agrandit les zones blanches, bouche les petits trous
+    # Érosion ensuite  : remet les objets à leur taille d'origine
+    return erosion_binaire(dilatation_binaire(image_binaire, taille), taille)
 
 
 # =============================================================================
@@ -1239,7 +1291,18 @@ def detection_principale(image_rgb, taille_flou):
     taille_morpho = max(3, int(round(min(image_rgb.shape[:2]) / 110)))
     if taille_morpho % 2 == 0:
         taille_morpho += 1
+
+    # COURS Semaine 10 : Ouverture puis Fermeture = nettoyage complet du masque.
+    #
+    # Étape 1 — Ouverture (Érosion → Dilatation) :
+    #   Supprime les petits points blancs parasites qui ne sont pas des pièces.
+    #   Ex: un grain de poussière blanc sur le fond sera effacé.
+    #
+    # Étape 2 — Fermeture (Dilatation → Érosion) :
+    #   Bouche les petits trous noirs à l'intérieur des pièces.
+    #   Ex: un reflet brillant au centre d'une pièce crée un trou -> on le referme.
     masque = ouverture_binaire(masque, taille_morpho)
+    masque = fermeture_binaire(masque, taille_morpho)
 
     aire_image = image_rgb.shape[0] * image_rgb.shape[1]
     aire_min = max(500, int(aire_image * 0.0010))
@@ -1332,6 +1395,12 @@ def detection_piece_unique(image_rgb):
     """
     gris = rgb_vers_gris(image_rgb)
 
+    # COURS Semaine 7 — Estimation du fond par les bords de l'image :
+    # On suppose que le fond (la surface sur laquelle reposent les pièces)
+    # est visible sur les bordures de l'image.
+    # On prend la MÉDIANE (et non la moyenne) car elle est robuste :
+    # si quelques pixels de bord appartiennent à une pièce, ils ne
+    # faussent pas le résultat.
     marge = max(8, int(round(min(gris.shape) * 0.03)))
     bord = np.concatenate(
         [
@@ -1343,6 +1412,18 @@ def detection_piece_unique(image_rgb):
     )
     fond = float(np.median(bord))
 
+    # COURS Semaine 7 — Soustraction d'images (section 6) :
+    # On soustrait la valeur du fond à chaque pixel de l'image.
+    # Résultat : les pixels qui ressemblent au fond donnent une différence ~0,
+    # les pixels qui appartiennent à une pièce donnent une différence élevée.
+    #
+    # Exemple concret :
+    #   fond estimé = 0.75
+    #   pixel de fond  = 0.73  ->  |0.73 - 0.75| = 0.02  (petit -> fond)
+    #   pixel de pièce = 0.30  ->  |0.30 - 0.75| = 0.45  (grand -> pièce)
+    #
+    # La valeur absolue est importante : la pièce peut être plus sombre
+    # OU plus claire que le fond (ex: pièce brillante sur fond sombre).
     difference = np.abs(gris - fond)
     difference_floue = flou_gaussien(difference, max(5, marge | 1))
     seuil = max(0.08, seuil_otsu(difference_floue))
