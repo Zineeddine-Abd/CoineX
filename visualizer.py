@@ -23,7 +23,6 @@ import numpy as np
 from traitement_2 import (
     lire_image_rgb,
     rgb_vers_hsl,
-    rgb_vers_gris,
     flou_gaussien,
     seuil_otsu,
     ouverture_binaire,
