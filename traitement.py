@@ -620,6 +620,104 @@ def flou_gaussien(image, taille):
 
 
 # =============================================================================
+# GRADIENT DE SOBEL
+# =============================================================================
+def gradient_sobel(image):
+    """
+    Calcule le gradient de Sobel d'une image en niveaux de gris normalisée [0,1].
+
+    COURS : Semaine 9 — Détection de contours, opérateur de Sobel
+    -------------------------------------------------------------
+    La détection de contours cherche les zones où l'intensité change brusquement.
+    Un CONTOUR correspond à un fort gradient (variation rapide de l'intensité).
+
+    FORMULE DU GRADIENT :
+        G  = √(Gx² + Gy²)
+
+    Où Gx et Gy sont les dérivées partielles (approximations discrètes) :
+        Gx = image convoluée par le noyau horizontal de Sobel
+        Gy = image convoluée par le noyau vertical de Sobel
+
+    NOYAUX DE SOBEL (tirés du cours, Semaine 9) :
+
+        Noyau horizontal (détecte les changements de gauche à droite) :
+            Kx = [[ 1,  0, -1],
+                  [ 2,  0, -2],
+                  [ 1,  0, -1]]
+
+        Noyau vertical (détecte les changements de haut en bas) :
+            Ky = [[ 1,  2,  1],
+                  [ 0,  0,  0],
+                  [-1, -2, -1]]
+
+    SÉPARABILITÉ (Semaine 8) :
+    --------------------------
+    Ces noyaux 2D peuvent être SÉPARÉS en deux convolutions 1D :
+
+        Kx = colonne [-1, 0, 1]ᵀ × ligne [1, 2, 1]
+        Ky = colonne [1, 2, 1]ᵀ  × ligne [-1, 0, 1]
+
+    On réutilise nos fonctions de convolution 1D existantes (convolution_1d_lignes
+    et convolution_1d_colonnes), ce qui rend le code cohérent avec le pipeline.
+
+    ÉTAPES PAS-À-PAS :
+    ------------------
+    1) Appliquer le lissage horizontal (noyau [1,2,1] normalisé) sur les lignes,
+       puis le gradient vertical (noyau [-1,0,1]) sur les colonnes → Gy
+    2) Appliquer le gradient horizontal (noyau [-1,0,1]) sur les lignes,
+       puis le lissage vertical (noyau [1,2,1] normalisé) sur les colonnes → Gx
+    3) Calculer la magnitude : G = √(Gx² + Gy²)
+    4) Normaliser G dans [0,1] pour rester compatible avec le pipeline
+
+    UTILITÉ DANS LE PROJET :
+    ------------------------
+    La carte de gradient peut compléter la saturation :
+    - Là où la saturation est faible (pièce peu colorée), le gradient
+      peut encore révéler les contours de la pièce.
+    - Utilisable comme canal alternatif ou en combinaison.
+
+    Paramètre :
+    -----------
+    image : tableau 2D float [0,1]  (typiquement issu de rgb_vers_gris ou rgb_vers_hsl)
+
+    Retour :
+    --------
+    gradient : tableau 2D float [0,1], valeurs élevées = contours détectés
+    """
+    image = image.astype(np.float32)
+
+    # ---- Noyaux 1D de Sobel ----
+    # Le noyau de Sobel 2D est séparable : on décompose en deux vecteurs 1D.
+    # Noyau de lissage (poids binomial) :
+    lissage  = np.array([1.0, 2.0, 1.0], dtype=np.float32) / 4.0   # somme = 1
+    # Noyau de dérivée (différence centrée) :
+    derivee  = np.array([-1.0, 0.0, 1.0], dtype=np.float32)         # pas de normalisation
+
+    # ---- Gradient horizontal Gx ----
+    # Kx détecte les variations de GAUCHE à DROITE.
+    # Décomposition : d'abord lissage vertical (colonnes), puis dérivée horizontale (lignes).
+    lisse_colonnes = convolution_1d_colonnes(image,  lissage)   # étape lissage
+    gx             = convolution_1d_lignes(lisse_colonnes, derivee)   # étape dérivée
+
+    # ---- Gradient vertical Gy ----
+    # Ky détecte les variations de HAUT en BAS.
+    # Décomposition : d'abord lissage horizontal (lignes), puis dérivée verticale (colonnes).
+    lisse_lignes = convolution_1d_lignes(image,    lissage)   # étape lissage
+    gy           = convolution_1d_colonnes(lisse_lignes, derivee)   # étape dérivée
+
+    # ---- Magnitude du gradient : G = √(Gx² + Gy²) ----
+    gradient = np.sqrt(gx * gx + gy * gy)
+
+    # ---- Normalisation dans [0,1] ----
+    # On divise par la valeur maximale pour garder la plage [0,1].
+    val_max = gradient.max()
+    if val_max > 0:
+        gradient = gradient / val_max
+
+    return gradient
+
+
+# =============================================================================
 # HISTOGRAMME ET SEUIL D'OTSU
 # =============================================================================
 def histogramme_u8(image):
@@ -643,6 +741,86 @@ def histogramme_u8(image):
     # np.bincount compte le nombre d'occurrences de chaque valeur de pixel (0 à 255)
     # ravel : aplati l'image 2D en 1D pour que bincount puisse compter tous les pixels
     return np.bincount(image_u8.ravel(), minlength=256).astype(np.float64)
+
+
+# =============================================================================
+# ÉGALISATION D'HISTOGRAMME
+# =============================================================================
+def egaliser_histogramme(image):
+    """
+    Égalise l'histogramme d'une image en niveaux de gris normalisée [0,1].
+
+    COURS : Semaine 7 — Égalisation d'histogramme (Histogram Equalization)
+    -----------------------------------------------------------------------
+    But : améliorer le contraste d'une image sur- ou sous-exposée en
+    redistribuant les intensités de façon plus uniforme.
+
+    FORMULE DU COURS :
+        y = max(0,  256 × C_I(x) − 1)
+
+    Où :
+        x    = niveau d'intensité d'entrée (0 à 255)
+        C_I  = histogramme CUMULÉ normalisé (entre 0 et 1)
+        y    = nouveau niveau d'intensité de sortie (0 à 255)
+
+    INTUITION :
+    -----------
+    Si une image est trop sombre, les pixels sont concentrés dans les basses
+    intensités. L'histogramme cumulatif monte donc très vite au début, puis
+    s'aplatit. La formule "étire" cette partie basse vers toute la plage [0,255].
+    Résultat : les zones sombres deviennent plus contrastées.
+
+    ÉTAPES PAS-À-PAS :
+    ------------------
+    1) Convertir l'image en uint8 [0,255] et calculer son histogramme
+       hist[i] = nombre de pixels d'intensité i
+    2) Normaliser : probabilites[i] = hist[i] / total_pixels
+    3) Calculer l'histogramme cumulé C[i] = Σ_{k=0}^{i} probabilites[k]
+       C[255] vaut toujours exactement 1.0
+    4) Appliquer la transformation : sortie[i] = max(0, 256 × C[i] − 1)
+       et clipper dans [0,255]
+    5) Remapper chaque pixel de l'image avec cette table de correspondance
+    6) Renormaliser le résultat en [0,1] pour rester compatible avec le pipeline
+
+    EXEMPLE :
+    ---------
+    Image très sombre → la majorité des pixels ont une intensité entre 0 et 80.
+    Après égalisation, ces pixels sont répartis entre 0 et 255.
+    → les nuances dans les zones sombres deviennent visibles.
+
+    Paramètre :
+    -----------
+    image : tableau 2D float32 ou float64, valeurs dans [0.0, 1.0]
+
+    Retour :
+    --------
+    image_egalisee : tableau 2D float32, valeurs dans [0.0, 1.0]
+    """
+    # Étape 1 : histogramme des niveaux d'intensité (256 niveaux)
+    hist = histogramme_u8(image)   # hist[i] = nombre de pixels d'intensité i
+    total = hist.sum()
+    if total == 0:
+        return image.copy()
+
+    # Étape 2 : histogramme cumulé normalisé C_I
+    # C_I[i] = Σ_{k=0}^{i} hist[k] / total   (fraction de pixels ≤ i)
+    cumul = np.cumsum(hist) / total   # np.cumsum = somme cumulée, de gauche à droite
+
+    # Étape 3 : table de correspondance (LUT — Look-Up Table)
+    # Pour chaque intensité d'entrée i, on calcule la nouvelle intensité de sortie.
+    # Formule du cours : y = max(0,  256 × C_I(i) − 1)
+    # On clippe ensuite entre 0 et 255 pour rester dans la plage valide.
+    lut = np.clip(256.0 * cumul - 1.0, 0.0, 255.0)   # LUT : 256 valeurs
+
+    # Étape 4 : conversion de l'image en entiers 0–255 pour utiliser la LUT
+    image_u8 = np.clip(np.rint(image * 255.0), 0, 255).astype(np.int32)
+
+    # Étape 5 : remapping — chaque pixel est remplacé par lut[valeur_pixel]
+    # image_u8 sert ici d'INDEX dans la table lut.
+    image_egalisee_u8 = lut[image_u8]   # indexation tableau : opération de base NumPy
+
+    # Étape 6 : renormalisation en [0,1] pour rester compatible avec le reste du pipeline
+    return (image_egalisee_u8 / 255.0).astype(np.float32)
 
 
 def seuil_otsu(image):
@@ -706,21 +884,64 @@ def seuil_otsu(image):
     if total == 0:
         return 0.5
 
-    # transformons l'histogramme en probabilités
-    probabilites = hist / total
-    # calcul des proportion de pixels jusqu’au niveau de gris i
-    cumul_prob = np.cumsum(probabilites)
-    # calcul de la moyenne cumulée des intensités jusqu’au niveau i
-    cumul_moy = np.cumsum(probabilites * np.arange(256))
-    # la moyenne totale de l'image (intensité moyenne globale) c'est le dernier élément de cumul_moy
-    moyenne_totale = cumul_moy[-1]
+    # -------------------------------------------------------------------------
+    # COURS Semaine 6 — Algorithme d’Otsu, boucle explicite pas-à-pas
+    # -------------------------------------------------------------------------
+    # Objectif : trouver le seuil t* qui MAXIMISE la variance inter-classes :
+    #
+    #   σ²_B(t) = w0(t) · w1(t) · (μ0(t) − μ1(t))²
+    #
+    #   w0(t) = poids de la classe "fond"    (pixels d’intensité ≤ t)
+    #   w1(t) = poids de la classe "objets"  (pixels d’intensité > t)
+    #   μ0(t) = intensité moyenne de la classe fond
+    #   μ1(t) = intensité moyenne de la classe objets
+    #
+    # On teste chaque seuil t de 0 à 255 et on garde le meilleur.
+    # Calcul INCRÉMENTAL : on accumule w0 et la somme des intensités du fond
+    # au fur et à mesure, évitant de tout recalculer depuis zéro à chaque t.
+    # -------------------------------------------------------------------------
 
-    variance_inter = (moyenne_totale * cumul_prob - cumul_moy) ** 2
-    variance_inter /= cumul_prob * (1.0 - cumul_prob) + 1e-12
+    # Précalcul : somme totale de toutes les intensités pondérées par leur fréquence
+    # somme_totale = Σ_{i=0}^{255}  i · hist[i]
+    somme_totale = 0.0
+    for i in range(256):
+        somme_totale += i * hist[i]
 
-    # np.argmax trouve l'indice du seuil qui maximise la variance inter-classes
-    seuil = int(np.argmax(variance_inter))
-    return seuil / 255.0
+    poids_fond  = 0.0   # Σ hist[0..t]          — compte de pixels dans la classe 0
+    somme_fond  = 0.0   # Σ i·hist[0..t]         — somme des intensités de la classe 0
+
+    meilleure_variance = -1.0
+    meilleur_seuil     = 128    # valeur par défaut de secours
+
+    for t in range(256):
+        # Ajout des pixels d’intensité t à la classe 0
+        poids_fond += hist[t]
+        somme_fond += t * hist[t]
+
+        # Classe 0 vide → ce seuil ne sépare rien, on passe au suivant
+        if poids_fond == 0:
+            continue
+
+        # Classe 1 vide → tous les pixels sont dans la classe 0, on s’arrête
+        poids_objet = total - poids_fond
+        if poids_objet == 0:
+            break
+
+        # Moyennes des deux classes
+        moyenne_fond   = somme_fond / poids_fond
+        moyenne_objet  = (somme_totale - somme_fond) / poids_objet
+
+        # Variance inter-classes σ²_B = w0·w1·(μ0−μ1)²
+        # (on utilise des comptes bruts ; la division par total² serait constante
+        #  et n’affecterait pas l’argmax)
+        variance = poids_fond * poids_objet * (moyenne_fond - moyenne_objet) ** 2
+
+        if variance > meilleure_variance:
+            meilleure_variance = variance
+            meilleur_seuil     = t
+
+    # Ramener le seuil en [0,1] (le pipeline travaille avec des valeurs normalisées)
+    return meilleur_seuil / 255.0
 
 
 # =============================================================================
@@ -1040,22 +1261,30 @@ def composantes_connexes(image_binaire):
             hauteur_bbox = y_max - y_min + 1
             largeur_bbox = x_max - x_min + 1
 
-            # OPTIMISATION : Calcul rapide du périmètre sans érosion coûteuse
-            # Compte les pixels de contour (pixels blancs avec au moins un voisin noir)
-            perimetre = 0
-            for py, px in zip(pixels_y, pixels_x):
-                # Vérifier si ce pixel est un pixel de contour
-                is_border = False
-                for dy, dx in voisins:
-                    ny, py_check = py + dy, py
-                    nx, px_check = px + dx, px
-                    # Si voisin hors limites ou noir, c'est un pixel de contour
-                    if not (0 <= ny < hauteur and 0 <= nx < largeur and masque[ny, nx]):
-                        is_border = True
-                        break
-                if is_border:
-                    perimetre += 1
-            
+            # -----------------------------------------------------------------
+            # COURS Semaine 10 — Périmètre par morphologie binaire
+            # -----------------------------------------------------------------
+            # Définition : le CONTOUR d'un objet = ses pixels qui ont au moins
+            # un voisin en dehors de l'objet.
+            #
+            # Formule morphologique :
+            #   Contour(A) = A  −  Érosion(A)
+            #
+            # Explication pas-à-pas :
+            #   1) Érosion(A) : garde seulement les pixels "intérieurs"
+            #      (ceux dont TOUS les voisins sont aussi dans l'objet).
+            #   2) A − Érosion(A) : on enlève l'intérieur, il ne reste que
+            #      les pixels de bord = le contour.
+            #   3) Périmètre = nombre de pixels du contour.
+            #
+            # On extrait le sous-masque de la boîte englobante pour travailler
+            # sur un petit tableau au lieu de l'image entière.
+            # -----------------------------------------------------------------
+            sous_masque = (etiquettes[y_min:y_max + 1, x_min:x_max + 1] == etiquette)
+            interieur   = erosion_binaire(sous_masque, 3)
+            contour     = sous_masque & ~interieur   # Contour = A − Érosion(A)
+            perimetre   = int(np.sum(contour))        # périmètre = nb pixels du contour
+
             # Éviter division par zéro
             if perimetre == 0:
                 perimetre = max(1, area)  # Sinon utiliser l'aire comme fallback
@@ -1286,7 +1515,11 @@ def detection_principale(image_rgb, taille_flou):
 
     saturation_floue = flou_gaussien(saturation, taille_locale)
     seuil = seuil_otsu(saturation_floue)
-    masque = saturation_floue > seuil
+
+    # On sauvegarde le masque binaire brut AVANT la morphologie.
+    # Il servira à construire le masque inversé si la détection normale échoue.
+    masque_brut = saturation_floue > seuil
+    masque = masque_brut
 
     taille_morpho = max(3, int(round(min(image_rgb.shape[:2]) / 110)))
     if taille_morpho % 2 == 0:
@@ -1306,9 +1539,105 @@ def detection_principale(image_rgb, taille_flou):
 
     aire_image = image_rgb.shape[0] * image_rgb.shape[1]
     aire_min = max(500, int(aire_image * 0.0010))
-    aire_max = int(aire_image * 0.18)
 
-    composantes = extraire_composantes_utiles(masque, aire_min, aire_max)
+    # -------------------------------------------------------------------------
+    # COURS Semaine 3 — Règle d'or : paramètres réglés sur la base de VALIDATION
+    # -------------------------------------------------------------------------
+    # Problème : quand beaucoup de pièces se touchent, elles forment une seule
+    # grande composante connexe qui dépasse le seuil d'aire maximum.
+    #
+    # Solution : on essaie plusieurs valeurs de aire_max, de la plus stricte
+    # à la plus permissive. On s'arrête dès qu'on trouve au moins une composante.
+    #
+    #   Facteur 0.18 : réglage de base, correspond à ≈ 1 pièce bien isolée
+    #   Facteur 0.35 : accepte des composantes plus grandes (2–3 pièces collées)
+    #   Facteur 0.60 : accepte de très grandes zones (4–8 pièces collées)
+    #   Facteur 0.90 : dernier recours, quasi toute l'image est acceptée
+    #
+    # Pourquoi pas d'emblée 0.90 ?
+    # Car un facteur trop grand accepterait le fond mal segmenté comme une pièce.
+    # On part donc du plus strict et on relâche seulement si nécessaire.
+    #
+    # IMPORTANT — Performance :
+    # composantes_connexes (le BFS) est l'opération la plus coûteuse du pipeline.
+    # On l'appelle UNE SEULE FOIS pour tout le masque, puis on filtre le résultat
+    # avec différents seuils d'aire. C'est équivalent à appeler extraire_composantes_utiles
+    # plusieurs fois, mais sans refaire le BFS à chaque itération.
+    # -------------------------------------------------------------------------
+
+    # Étape 1 : BFS unique — on extrait TOUTES les composantes du masque
+    toutes_composantes = composantes_connexes(masque)
+
+    # Étape 2 : filtrage progressif par aire_max (pas de nouveau BFS)
+    composantes = []
+    for facteur_max in [0.18, 0.35, 0.60, 0.90]:
+        aire_max    = int(aire_image * facteur_max)
+        composantes = [
+            comp for comp in toutes_composantes
+            if aire_min <= comp["area"] <= aire_max and not comp["touche_bord"]
+        ]
+        if composantes:
+            break   # on a trouvé des composantes, pas besoin de relâcher davantage
+
+    # -------------------------------------------------------------------------
+    # DÉTECTION INVERSÉE — pièces peu saturées sur fond coloré
+    # -------------------------------------------------------------------------
+    # Problème : l'approche normale suppose que les pièces ont une saturation
+    # PLUS HAUTE que le fond (fond blanc/neutre + pièces dorées/colorées).
+    #
+    # Mais certaines images ont l'inverse :
+    #   - pièces argentées/métalliques → saturation BASSE (gris)
+    #   - fond coloré (papier bleu, bois, tissu) → saturation HAUTE
+    #
+    # Dans ce cas, Otsu sépare bien les deux classes, mais on a segmenté
+    # le FOND à la place des pièces. La solution : inverser le masque.
+    #
+    # Comment on détecte que la détection normale a échoué ?
+    # On compte les composantes "de référence" (circulaires, bien remplies).
+    # Si aucune n'est trouvée, les objets détectés ne ressemblent pas à des pièces
+    # → on essaie avec le masque inversé.
+    # -------------------------------------------------------------------------
+    nb_ref_normal = sum(
+        1 for c in composantes
+        if c["circularite"] >= COIN_REFERENCE_CIRCULARITY_MIN
+        and c["remplissage"] >= COIN_REFERENCE_FILL_MIN
+        and COIN_REFERENCE_ASPECT_MIN
+            <= c["hauteur_bbox"] / max(1, c["largeur_bbox"])
+            <= COIN_REFERENCE_ASPECT_MAX
+    )
+
+    if nb_ref_normal == 0:
+        # Inverser le masque brut : les zones PEU saturées deviennent blanches
+        # (= les pièces métalliques argentées, peu colorées)
+        masque_inv = ~masque_brut
+        masque_inv = ouverture_binaire(masque_inv, taille_morpho)
+        masque_inv = fermeture_binaire(masque_inv, taille_morpho)
+
+        toutes_inv = composantes_connexes(masque_inv)
+        composantes_inv = []
+        for facteur_max in [0.18, 0.35, 0.60, 0.90]:
+            aire_max_inv = int(aire_image * facteur_max)
+            composantes_inv = [
+                c for c in toutes_inv
+                if aire_min <= c["area"] <= aire_max_inv and not c["touche_bord"]
+            ]
+            if composantes_inv:
+                break
+
+        # On utilise le masque inversé seulement s'il donne de meilleures
+        # composantes circulaires que l'approche normale
+        nb_ref_inv = sum(
+            1 for c in composantes_inv
+            if c["circularite"] >= COIN_REFERENCE_CIRCULARITY_MIN
+            and c["remplissage"] >= COIN_REFERENCE_FILL_MIN
+            and COIN_REFERENCE_ASPECT_MIN
+                <= c["hauteur_bbox"] / max(1, c["largeur_bbox"])
+                <= COIN_REFERENCE_ASPECT_MAX
+        )
+
+        if nb_ref_inv > nb_ref_normal:
+            composantes = composantes_inv
+
     return estimer_nombre_depuis_composantes(composantes), composantes
 
 
@@ -1564,14 +1893,20 @@ def compter_pieces(chemin_image, taille_flou=(7, 7)):
             return 1
 
         # Règle 2 :
-        # Si la prédiction principale est grande, mais qu'il y a très peu
-        # de composantes et qu'au moins l'une d'elles ressemble fortement à
-        # une pièce, on corrige aussi à 1.
-        
+        # Si la prédiction principale est grande, mais qu'il y a UNE SEULE
+        # composante qui ressemble fortement à une pièce, on corrige à 1.
+        #
+        # NOTE : on utilise == 1 et non <= 2.
+        # Raisonnement : si deux composantes DISTINCTES passent tous les filtres
+        # (aire, bord, circularité, remplissage), c'est qu'il y a probablement
+        # au moins 2 vraies pièces. La règle ne doit pas annuler cette information.
+        # Avec <= 2, des images de 10 pièces fusionnées en 2 composantes étaient
+        # incorrectement corrigées à 1 (erreur +9 au MAE).
+
         # Utilisation des hyperparamètres
         if (
             prediction_principale >= 4
-            and len(composantes) <= 2
+            and len(composantes) == 1
             and any(comp["circularite"] >= CORRECTION_RARE_CIRCULARITY_MIN and comp["remplissage"] >= CORRECTION_RARE_FILL_MIN for comp in composantes)
         ):
             return 1
