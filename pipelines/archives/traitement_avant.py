@@ -563,7 +563,7 @@ def compter_pieces(chemin_image, taille_flou=5):
 
 
 #il y a aussi une autre amelioration que j'ai faite dans le fichier traitement2 qui suit le meme pipeline mais pas la meme maniere de resolution c'est a dire : 
-#elle suit les meme etapes de resolution du cours (les grand titre) mais pas la meme logique d'implementation du coup ca a permis d'avoir de meilleur resultat et de meilleur perf (rapidite w robestesse)
+#elle suit les meme etapes de resolution  (les grand titre) mais pas la meme logique d'implementation du coup ca a permis d'avoir de meilleur resultat et de meilleur perf (rapidite w robestesse)
 
 
 #pour vous eviter de tout reexecuter parce que c long ca permet de vous faire gagner du temps, il y a une amelioration dans le mae et mse 

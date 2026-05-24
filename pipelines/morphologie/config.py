@@ -45,7 +45,7 @@ import numpy as np
 # Utilisé pour identifier une composante connexe qui ressemble vraiment à une pièce.
 # Une pièce "de référence" nous permet d'estimer la taille typique d'une pièce.
 #
-# Cours : Semaine 7 - Descripteurs d'objets et composantes connexes
+# Descripteurs d'objets et composantes connexes
 #
 COIN_REFERENCE_CIRCULARITY_MIN = 0.45      # Circularité minimale (1.0 = cercle parfait)
 COIN_REFERENCE_FILL_MIN = 0.45             # Remplissage minimum (aire / bbox)
@@ -56,7 +56,7 @@ COIN_REFERENCE_ASPECT_MAX = 1.55           # Ratio maximum hauteur/largeur (si >
 # Quand deux pièces se touchent, elles forment une seule composante connexe.
 # Ces paramètres permettent de détecter et de compter ces cas.
 #
-# Cours : Semaine 7 - Analyse d'objets connexes
+# Analyse d'objets connexes
 #
 MERGE_AREA_RATIO_THRESHOLD = 1.8           # Si aire > 1.8 × aire_typique, compte comme 2 pièces
 MERGE_FILL_MIN = 0.35                      # Remplissage minimum pour détecter fusion
@@ -65,7 +65,7 @@ MERGE_FILL_MIN = 0.35                      # Remplissage minimum pour détecter 
 # Filet de sécurité : si le pipeline principal doute, on teste si c'est exactement 1 pièce.
 # Critères très stricts pour ne faux-positif.
 #
-# Cours : Semaine 7 - Validation de composantes
+# Validation de composantes
 #
 SINGLE_COIN_FILL_MIN = 0.62                # Remplissage minimum pour une pièce unique
 SINGLE_COIN_CIRCULARITY_MIN = 0.40         # Circularité minimum pour une pièce unique
@@ -76,7 +76,7 @@ SINGLE_COIN_ASPECT_RATIO_MAX = 1.28        # Ratio max hauteur/largeur
 # Si la prédiction principale est très grande mais qu'on observe une seule
 # composante énorme et très circulaire, on corrige à 1.
 #
-# Cours : Semaine 7-8 - Analyse statistique des composantes
+# Analyse statistique des composantes
 #
 CORRECTION_LARGE_CIRCULARITY_MIN = 0.48    # Circularité pour très grande pièce
 CORRECTION_LARGE_FILL_MIN = 0.68           # Remplissage pour très grande pièce
@@ -85,7 +85,7 @@ CORRECTION_LARGE_AREA_MULTIPLIER = 8.0     # Doit être > 8× aire typique
 # ===== GROUPE 5 : RÈGLES CORRECTIVES (COMPOSANTES RARES) =====
 # Si prediction est très grande mais peu de composantes, peut être 1 grosse pièce.
 #
-# Cours : Semaine 7 - Statistiques sur les composantes
+# Statistiques sur les composantes
 #
 CORRECTION_RARE_CIRCULARITY_MIN = 0.55     # Circularité stricte
 CORRECTION_RARE_FILL_MIN = 0.72            # Remplissage strict

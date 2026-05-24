@@ -11,7 +11,7 @@ def rgb_vers_hsl(image_rgb):
     """
     Convertit une image RGB en HSL (Hue, Saturation, Luminosity).
     
-    COURS : semaine 3 - Espaces couleur (Color Spaces)
+    Espaces couleur (Color Spaces)
     -----------------------------------------------
     Convertit RGB (additif, écrans) → HSL (perceptuel, robuste aux ombres)
     Formule mathématique de saturation HSL :
@@ -62,7 +62,7 @@ def rgb_vers_gris(image_rgb):
     """
     Convertit une image RGB en niveaux de gris normalisés entre 0 et 1.
     
-    COURS : semaine 3 - Conversion en niveaux de gris
+    Conversion en niveaux de gris
     -----------------------------------------------
     Formule de luminance standard :
     Gray = 0.299R + 0.587G + 0.114B

@@ -10,7 +10,7 @@ def noyau_gaussien_1d(taille, sigma):
     """
     Crée un noyau gaussien 1D normalisé pour le filtrage.
     
-    COURS : semaine 8 - Convolution & Filtrage Gaussien
+    Convolution & Filtrage Gaussien
     -----------------------------------------------
     Formule mathématique :
     G(x) = exp(-(x²) / (2σ²))  [normalisé : sum = 1]
@@ -73,14 +73,14 @@ def convolution_1d_lignes(image, noyau):
     """
     Applique la convolution 1D horizontalement (ligne par ligne).
     
-    COURS : Week 8 - Convolution discrète
+    Convolution discrète
     -----------------------------------
     Convolution 1D discrète : (f * g)[n] = Σ f[m] * g[n-m]
     
     Mode 'same' : préserve la taille de l'image (padding aux bords) pour que:
     taille entrée = taille sortie
     
-    np.convolve() implémente exactement la formule mathématique du cours,
+    np.convolve() implémente exactement la 
     pas une approximation ou optimisation en black-box.
 
     Pourquoi une convolution 1D :
@@ -119,11 +119,10 @@ def convolution_1d_lignes(image, noyau):
     Image originale : [10, 10, 20, 30, 30]
     On prolonge (padding “edge”) : [10, 10, 10, 20, 30, 30, 30]
     
-    [AJOUT POUR LA SOUTENANCE] :
-    ----------------------------
+        ----------------------------
     Le code d'origine (commenté ci-dessous) utilisait np.einsum et sliding_window_view
     qui sont très complexes à justifier. Le nouveau code utilise np.convolve qui 
-    traduit exactement la combinaison linéaire vue en cours (Semaine 8).
+    traduit exactement la combinaison linéaire  .
     """
     # ----- ANCIEN CODE GARDÉ EN COMMENTAIRE -----
     # pad = len(noyau) // 2
@@ -132,7 +131,7 @@ def convolution_1d_lignes(image, noyau):
     # return np.einsum("ijk,k->ij", fenetres, noyau[::-1], optimize=True)
     # ---------------------------------------------
 
-    # COURS Semaine 9 — Padding aux bords de l'image :
+    # Padding aux bords de l'image :
     # np.convolve avec mode='same' applique un ZERO PADDING implicitement.
     # Cela signifie que les pixels imaginaires en dehors de l'image valent 0.
     #
@@ -184,7 +183,7 @@ def flou_gaussien(image, taille):
     """
     Applique un flou gaussien à une image 2D (2D Gaussian filtering).
     
-    COURS : semaine 8 - Opérations locales & Filtrage Gaussien
+    Opérations locales & Filtrage Gaussien
     -------------------------------------------------------
     Combine deux convolutions 1D séparables pour efficacité.
     C'est une \"opération locale\" : chaque pixel dépend de ses voisins.
@@ -238,7 +237,7 @@ def gradient_sobel(image):
     """
     Calcule le gradient de Sobel d'une image en niveaux de gris normalisée [0,1].
 
-    COURS : Semaine 9 — Détection de contours, opérateur de Sobel
+    Détection de contours, opérateur de Sobel
     -------------------------------------------------------------
     La détection de contours cherche les zones où l'intensité change brusquement.
     Un CONTOUR correspond à un fort gradient (variation rapide de l'intensité).
@@ -250,7 +249,7 @@ def gradient_sobel(image):
         Gx = image convoluée par le noyau horizontal de Sobel
         Gy = image convoluée par le noyau vertical de Sobel
 
-    NOYAUX DE SOBEL (tirés du cours, Semaine 9) :
+    NOYAUX DE SOBEL ( :
 
         Noyau horizontal (détecte les changements de gauche à droite) :
             Kx = [[ 1,  0, -1],
@@ -262,7 +261,7 @@ def gradient_sobel(image):
                   [ 0,  0,  0],
                   [-1, -2, -1]]
 
-    SÉPARABILITÉ (Semaine 8) :
+    SÉPARABILITÉ  :
     --------------------------
     Ces noyaux 2D peuvent être SÉPARÉS en deux convolutions 1D :
 

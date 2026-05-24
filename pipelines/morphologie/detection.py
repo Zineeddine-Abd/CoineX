@@ -48,7 +48,7 @@ def estimer_nombre_depuis_composantes(composantes):
     """
     Estime le nombre de pièces réelles à partir des composantes détectées.
     
-    COURS : Week 7 - Analyse statistique d'objets
+    Analyse statistique d'objets
     ============================================
     
     PROBLÈME À RÉSOUDRE :
@@ -143,7 +143,7 @@ def detection_principale(image_rgb, taille_flou):
     """
     Détection principale basée sur la saturation.
     
-    COURS : Semaines 3 à 8 - Pipeline complet de traitement d'image
+    Pipeline complet de traitement d'image
     ===============================================================
     
     PIPELINE DÉTAILLÉ :
@@ -229,7 +229,7 @@ def detection_principale(image_rgb, taille_flou):
     if taille_morpho % 2 == 0:
         taille_morpho += 1
 
-    # COURS Semaine 10 : Ouverture puis Fermeture = nettoyage complet du masque.
+    # Ouverture puis Fermeture = nettoyage complet du masque.
     #
     # Étape 1 — Ouverture (Érosion → Dilatation) :
     #   Supprime les petits points blancs parasites qui ne sont pas des pièces.
@@ -245,7 +245,7 @@ def detection_principale(image_rgb, taille_flou):
     aire_min = max(500, int(aire_image * 0.0010))
 
     # -------------------------------------------------------------------------
-    # COURS Semaine 3 — Règle d'or : paramètres réglés sur la base de VALIDATION
+    # Règle d'or : paramètres réglés sur la base de VALIDATION
     # -------------------------------------------------------------------------
     # Problème : quand beaucoup de pièces se touchent, elles forment une seule
     # grande composante connexe qui dépasse le seuil d'aire maximum.
@@ -352,7 +352,7 @@ def detection_piece_unique(image_rgb):
     """
     Détection spécialisée : \"Y a-t-il probablement exactement 1 pièce ?\"
     
-    COURS : Week 7 - Validation & stratégies de détection
+    Validation & stratégies de détection
     =====================================================
     
     BUT : Filet de sécurité si la détection principale doute
@@ -428,7 +428,7 @@ def detection_piece_unique(image_rgb):
     """
     gris = rgb_vers_gris(image_rgb)
 
-    # COURS Semaine 7 — Estimation du fond par les bords de l'image :
+    # Estimation du fond par les bords de l'image :
     # On suppose que le fond (la surface sur laquelle reposent les pièces)
     # est visible sur les bordures de l'image.
     # On prend la MÉDIANE (et non la moyenne) car elle est robuste :
@@ -445,7 +445,7 @@ def detection_piece_unique(image_rgb):
     )
     fond = float(np.median(bord))
 
-    # COURS Semaine 7 — Soustraction d'images (section 6) :
+    # Soustraction d'images (section 6) :
     # On soustrait la valeur du fond à chaque pixel de l'image.
     # Résultat : les pixels qui ressemblent au fond donnent une différence ~0,
     # les pixels qui appartiennent à une pièce donnent une différence élevée.
@@ -491,14 +491,13 @@ def compter_pieces(chemin_image, taille_flou=(7, 7)):
     APERÇU GLOBAL :
     
     Ce programme implémente un PIPELINE COMPLET de traitement d'image,
-    démontrant les concepts de chaque semaine du cours.
     
-    SEMAINE 1-2  : Représentation (lire l'image, normaliser en RGB propre)
-    SEMAINE 3    : Espaces couleur (HSL saturation pour la robustesse)
-    SEMAINE 5    : Seuillage (Otsu automatique, diviseur 2 classes)
-    SEMAINE 6    : Morphologie (ouverture = érosion + dilatation)
-    SEMAINE 7    : Composantes connexes (8-connectivity, descripteurs)
-    SEMAINE 8    : Convolution & Filtrage (Gaussian blur séparable)
+    Représentation (lire l'image, normaliser en RGB propre)
+    Espaces couleur (HSL saturation pour la robustesse)
+    Seuillage (Otsu automatique, diviseur 2 classes)
+    Morphologie (ouverture = érosion + dilatation)
+    Composantes connexes (8-connectivity, descripteurs)
+    Convolution & Filtrage (Gaussian blur séparable)
     
     FLUX DE CONTRÔLE :
     

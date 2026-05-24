@@ -10,7 +10,7 @@ def erosion_binaire(image_binaire, taille):
     """
     Érosion binaire (Binary Erosion Morphological Operation).
     
-    COURS : semaine 6 - Opérations morphologiques binaires
+    Opérations morphologiques binaires
     --------------------------------------------------
     Définition : Un pixel reste blanc (True) SIseul si TOUS les pixels
     dans la fenêtre locale autour de lui sont blancs.
@@ -56,7 +56,7 @@ def dilatation_binaire(image_binaire, taille):
     """
     Dilatation binaire (Binary Dilation Morphological Operation).
     
-    COURS : semaine 6 - Opérations morphologiques binaires
+    Opérations morphologiques binaires
     -------------------------------------------------
     Définition : Un pixel devient blanc (True) SI AU MOINS UN pixel
     dans la fenêtre locale autour de lui est blanc.
@@ -101,7 +101,7 @@ def ouverture_binaire(image_binaire, taille):
     """
     Ouverture binaire = Érosion suivi de Dilation (Opening Operation).
 
-    COURS : semaine 6 - Composition d'opérations morphologiques
+    Composition d'opérations morphologiques
     -------------------------------------------------------
     Formule : O = Dilate(Erode(I))
 
@@ -137,7 +137,7 @@ def fermeture_binaire(image_binaire, taille):
     """
     Fermeture binaire = Dilatation suivie d'Érosion (Closing Operation).
 
-    COURS : Semaine 10 - Morphologie mathématique (opérations composées)
+    Morphologie mathématique (opérations composées)
     -------------------------------------------------------------------
     Formule : Fermeture = Erosion( Dilatation(I) )
 
@@ -189,7 +189,7 @@ def composantes_connexes(image_binaire):
     Extrait toutes les composantes connexes d'un masque binaire et calcule
     plusieurs descripteurs de forme pour chacune.
     
-    COURS : semaine 7 - Analyse d'objets & Composantes connexes
+    Analyse d'objets & Composantes connexes
     ==========================================================
     
     DÉFINITIONS :
@@ -204,7 +204,7 @@ def composantes_connexes(image_binaire):
        c. Étiqueter tous les pixels trouvés avec même étiquette
     3. Calculer descripteurs de forme pour chaque composante
     
-    DESCRIPTEURS CALCULÉS (Week 7 - Properties of objects) :
+    DESCRIPTEURS CALCULÉS (Properties of objects) :
     - area           : nombre de pixels
     - bbox           : boîte englobante (y_min, x_min, y_max, x_max)
     - hauteur_bbox / largeur_bbox : dimensions de la boîte
@@ -233,7 +233,7 @@ def composantes_connexes(image_binaire):
     Pourquoi la connexité 8 :
     -------------------------
     Une vraie région d'objet peut être connectée par diagonale.
-    [AJOUT POUR LA SOUTENANCE - Semaine 8] : Contrairement à la 4-connexité, 
+    Contrairement à la 4-connexité, 
     la 8-connexité est indispensable ici pour palier aux bruits de discrétisation 
     sur les bords courbes des pièces de monnaie.
 
@@ -321,7 +321,7 @@ def composantes_connexes(image_binaire):
             largeur_bbox = x_max - x_min + 1
 
             # -----------------------------------------------------------------
-            # COURS Semaine 10 — Périmètre par morphologie binaire
+            # Périmètre par morphologie binaire
             # -----------------------------------------------------------------
             # Définition : le CONTOUR d'un objet = ses pixels qui ont au moins
             # un voisin en dehors de l'objet.

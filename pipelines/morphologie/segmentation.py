@@ -36,13 +36,12 @@ def egaliser_histogramme(image):
     """
     Égalise l'histogramme d'une image en niveaux de gris normalisée [0,1].
 
-    COURS : Semaine 7 — Égalisation d'histogramme (Histogram Equalization)
+    Égalisation d'histogramme (Histogram Equalization)
     -----------------------------------------------------------------------
     But : améliorer le contraste d'une image sur- ou sous-exposée en
     redistribuant les intensités de façon plus uniforme.
 
-    FORMULE DU COURS :
-        y = max(0,  256 × C_I(x) − 1)
+    FORMULE DU         y = max(0,  256 × C_I(x) − 1)
 
     Où :
         x    = niveau d'intensité d'entrée (0 à 255)
@@ -94,7 +93,7 @@ def egaliser_histogramme(image):
 
     # Étape 3 : table de correspondance (LUT — Look-Up Table)
     # Pour chaque intensité d'entrée i, on calcule la nouvelle intensité de sortie.
-    # Formule du cours : y = max(0,  256 × C_I(i) − 1)
+    # y = max(0,  256 × C_I(i) − 1)
     # On clippe ensuite entre 0 et 255 pour rester dans la plage valide.
     lut = np.clip(256.0 * cumul - 1.0, 0.0, 255.0)   # LUT : 256 valeurs
 
@@ -113,7 +112,7 @@ def seuil_otsu(image):
     """
     Calcule automatiquement un seuil d'Otsu dans [0,1].
     
-    COURS : semaine 5 - Segmentation par seuillage & Algorithme d'Otsu
+    Segmentation par seuillage & Algorithme d'Otsu
     ================================================================
     
     PRINCIPE MATHÉMATIQUE :
@@ -156,7 +155,7 @@ def seuil_otsu(image):
     - un pic autour de 170 pour les pièces
     Otsu choisira un seuil intermédiaire.
 
-    [AJOUT POUR LA SOUTENANCE] - Lien avec le cours (Semaine 6) :
+    Explication :
     -------------------------------------------------------------
     Pourquoi Otsu et pas les K-Moyennes ?
     Ici, nous voulons séparer exactement 2 classes (Fond vs Pièce).
@@ -171,7 +170,7 @@ def seuil_otsu(image):
         return 0.5
 
     # -------------------------------------------------------------------------
-    # COURS Semaine 6 — Algorithme d’Otsu, boucle explicite pas-à-pas
+    # Algorithme d’Otsu, boucle explicite pas-à-pas
     # -------------------------------------------------------------------------
     # Objectif : trouver le seuil t* qui MAXIMISE la variance inter-classes :
     #

@@ -13,7 +13,7 @@ def lire_image_rgb(chemin_image):
     Lit une image depuis le disque, la convertit dans un format RGB propre,
     puis la redimensionne si elle est trop grande.
     
-    COURS : Semaine 1-2 - Représentation des images numériques
+    Représentation des images numériques
     --------------------------------------------------------
     - Modèle mathématique : f(Ω) → X^c
     - Sampling (discrétisation spatiale en pixels)
