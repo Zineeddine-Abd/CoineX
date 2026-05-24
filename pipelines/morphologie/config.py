@@ -32,13 +32,6 @@ import numpy as np
 # - 1 seule pièce brillante -> peut être découpée en plusieurs régions
 # - objet  au bord -> ne doit pas être compté
 # - image très grande -> coût de calcul plus élevé si on ne redimensionne pas
-
-# =============================================================================
-# CONFIGURATION & HYPERPARAMÈTRES
-# =============================================================================
-# [RÈGLE D'OR] : Toutes les valeurs ci-dessous ont été réglées empiriquement
-# sur la base de VALIDATION UNIQUEMENT, sans regarder la base de test.
-# Cette approche garantit que les résultats finaux ne sont pas biaisés.
 # =============================================================================
 
 # ===== GROUPE 1 : DESCRIPTEURS DE FORMES POUR COIN DE RÉFÉRENCE =====

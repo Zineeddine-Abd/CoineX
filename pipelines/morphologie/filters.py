@@ -121,7 +121,7 @@ def convolution_1d_lignes(image, noyau):
     
         ----------------------------
     Le code d'origine (commenté ci-dessous) utilisait np.einsum et sliding_window_view
-    qui sont très complexes à justifier. Le nouveau code utilise np.convolve qui 
+    qui sont très complexes. Le nouveau code utilise np.convolve qui 
     traduit exactement la combinaison linéaire  .
     """
     # ----- ANCIEN CODE GARDÉ EN COMMENTAIRE -----
