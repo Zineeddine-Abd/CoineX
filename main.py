@@ -3,6 +3,9 @@ from evaluation import evaluer_modele
 def main():
     DOSSIER_VALIDATION = "data/validation"
     JSON_VALIDATION = "data/validation.json"
+
+    DOSSIER_TRAINING = "data/train"
+    JSON_TRAINING = "data/train.json"
     
     DOSSIER_TEST = "data/test"
     JSON_TEST = "data/test.json"
@@ -12,6 +15,9 @@ def main():
     print("PHASE DE VALIDATION (Réglage des hyperparamètres)")
     meilleur_flou = (7, 7)
     evaluer_modele(DOSSIER_VALIDATION, JSON_VALIDATION, taille_flou=meilleur_flou)
+    print("PHASE DE TRAINING (Réglage des hyperparamètres)")
+    meilleur_flou = (7, 7)
+    evaluer_modele(DOSSIER_TRAINING, JSON_TRAINING, taille_flou=meilleur_flou)
 
     # 2- PHASE DE TEST (RÈGLE D'OR)
     # print("\n\nPHASE DE TEST (Évaluation finale)")

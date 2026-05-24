@@ -1,7 +1,8 @@
 import os
 import json
-from traitement import compter_pieces
+# from traitement import compter_pieces # pour tester le pipeline classique original dans la même évaluation
 # from traitement_contours import compter_pieces  # pour tester le pipeline de contours dans la même évaluation
+from traitement_nn import compter_pieces # pour tester le pipeline de Deep Learning dans la même évaluation
 
 def evaluer_modele(dossier_images, fichier_json, taille_flou=(7, 7), **kwargs):
     """
