@@ -1,16 +1,16 @@
 """
 Pipeline contours de détection de pièces.
 
-Chaîne complète (chaque étape pointe vers le module du cours qui la justifie) :
-  0. Sous-échantillonnage                        (Semaine 4 §2.3 Downsampling)
-  1. Conversion en niveaux de gris par luminance (Semaine 4 §5 méthode C)
-  2. Pré-lissage gaussien (tue la texture)       (Semaine 8 §1 opérations locales)
-  3. Égalisation d'histogramme                   (Semaine 7 §1)
-  4. Second lissage doux avant dérivée           (Semaine 8 §1)
-  5. Détection de contours par Sobel (X, Y, mag) (Semaine 8 §2 convolution)
-  6. Seuillage automatique d'Otsu                (Semaine 6)
-  7. Fermeture morphologique (petit noyau)       (post-traitement, Semaine 2)
-  8. Remplissage des silhouettes par masque      (Semaine 7 §4 multiplication)
+Chaîne complète :
+  0. Sous-échantillonnage                        
+  1. Conversion en niveaux de gris par luminance 
+  2. Pré-lissage gaussien (tue la texture)       
+  3. Égalisation d'histogramme                   
+  4. Second lissage doux avant dérivée           
+  5. Détection de contours par Sobel (X, Y, mag) 
+  6. Seuillage automatique d'Otsu                
+  7. Fermeture morphologique (petit noyau)       (post-traitement, )
+  8. Remplissage des silhouettes par masque      
   9a. Ouverture (élimination des speckles)       (post-traitement)
   9b. Érosion avec noyau circulaire              (sépare les pièces tangentes)
  10. Filtrage par propriétés géométriques        (extraction de primitives, S2) :
@@ -65,41 +65,41 @@ def pipeline_contours(
         return {"erreur": f"Image introuvable: {chemin_image}", "compteur": 0}
 
     # 0. Sous-échantillonnage : réduire la résolution pour calmer le Sobel
-    #    et accélérer le traitement (Semaine 4 §2.3 Downsampling).
+    #    et accélérer le traitement .
     h, w = img.shape[:2]
     if w > largeur_cible:
         r = largeur_cible / w
         img = cv2.resize(img, (largeur_cible, int(h * r)), interpolation=cv2.INTER_AREA)
 
-    # 1. Niveaux de gris par formule de luminance (Semaine 4 §5 méthode C).
+    # 1. Niveaux de gris par formule de luminance .
     gris = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     # 2. Pré-lissage fort : tue la texture/grain du support avant l'égalisation,
-    #    sinon equalizeHist amplifie ce bruit (Semaine 8 §1 opération locale).
+    #    sinon equalizeHist amplifie ce bruit .
     p_x, p_y = _impair(taille_pre_flou[0]), _impair(taille_pre_flou[1])
     pre_flou = cv2.GaussianBlur(gris, (p_x, p_y), 0)
     # pre_flou = gris
 
-    # 3. Égalisation d'histogramme : étaler la dynamique (Semaine 7 §1).
+    # 3. Égalisation d'histogramme : étaler la dynamique .
     egalisee = cv2.equalizeHist(pre_flou)
 
     # 4. Second lissage doux juste avant Sobel pour stabiliser la dérivée.
     t_x, t_y = _impair(taille_flou[0]), _impair(taille_flou[1])
     floute = cv2.GaussianBlur(egalisee, (t_x, t_y), 0)
 
-    # 5. Sobel : convolution avec les noyaux dérivateurs (Semaine 8 §2).
+    # 5. Sobel : convolution avec les noyaux dérivateurs .
     sobel_x = cv2.Sobel(floute, cv2.CV_64F, 1, 0, ksize=3)
     sobel_y = cv2.Sobel(floute, cv2.CV_64F, 0, 1, ksize=3)
     magnitude = np.sqrt(sobel_x ** 2 + sobel_y ** 2)
     m_max = magnitude.max() if magnitude.max() > 0 else 1.0
     magnitude_u8 = np.uint8(255.0 * magnitude / m_max)
 
-    # 6. Seuillage automatique d'Otsu sur la magnitude (Semaine 6).
+    # 6. Seuillage automatique d'Otsu sur la magnitude .
     _, contours_bin_otsu = cv2.threshold(
         magnitude_u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
     # 6bis. Union avec un seuil bas (équivalent du seuillage par hystérésis
-    #       Semaine 5 §1.3) : capture les bords faibles d'anneaux fragmentés.
+    #       §1.3) : capture les bords faibles d'anneaux fragmentés.
     if seuil_bas_hysteresis is not None:
         _, contours_bin_bas = cv2.threshold(
             magnitude_u8, int(seuil_bas_hysteresis), 255, cv2.THRESH_BINARY
@@ -117,7 +117,7 @@ def pipeline_contours(
     )
 
     # 8. Remplissage : on transforme les contours fermés en silhouettes pleines
-    #    grâce à un masque binaire (Semaine 7 §4 multiplication/masque).
+    #    grâce à un masque binaire .
     #    Quand `remplir_par_hull=True`, on remplit l'enveloppe convexe de chaque
     #    contour : un anneau troué reste convexe-fermé donc se remplit comme un
     #    disque. Sinon on remplit le contour tel quel.

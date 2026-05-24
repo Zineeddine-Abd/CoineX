@@ -12,7 +12,7 @@ Différence fondamentale avec traitement.py :
                    → un blob rempli = forcément à l'intérieur d'un contour fermé fort
                    → beaucoup moins de fausses détections
 
-Pipeline complet (numéros de semaine du cours) :
+Pipeline complet :
 ─────────────────────────────────────────────────
   S1-S2  lire_image_rgb           lecture et normalisation de l'image
   S4     rgb_vers_gris            conversion en canal unique (luminance)
@@ -70,7 +70,7 @@ def rgb_vers_gris(image_rgb):
     """
     Convertit une image RGB en niveaux de gris normalisés dans [0, 1].
 
-    COURS S4 — Formule de luminance standard :
+    Formule de luminance standard :
         Gray = 0.299 R + 0.587 G + 0.114 B
 
     Ces coefficients reflètent la sensibilité différente de l'œil humain
@@ -88,7 +88,7 @@ def _conv1d_lignes(image, noyau):
     """
     Convolution 1D horizontale, appliquée ligne par ligne.
 
-    COURS S8 — Séparabilité et convolution discrète :
+    Séparabilité et convolution discrète :
         (f * g)[n] = Σ f[m] · g[n−m]
 
     On utilise np.convolve sur chaque ligne individuellement.
@@ -109,7 +109,7 @@ def _conv1d_colonnes(image, noyau):
     """
     Convolution 1D verticale, appliquée colonne par colonne.
 
-    COURS S8 — Même principe que _conv1d_lignes, mais vertical.
+    Même principe que _conv1d_lignes, mais vertical.
     C'est l'étape "verticale" du filtre séparable 2D.
     """
     H, W = image.shape
@@ -126,7 +126,7 @@ def flou_gaussien(image, taille):
     """
     Flou gaussien 2D par deux convolutions 1D séparables.
 
-    COURS S8 — Filtrage gaussien :
+    Filtrage gaussien :
         G(x) = exp(−x² / (2σ²)),  normalisé pour que Σ G(x) = 1
 
     La séparabilité permet de faire deux passes 1D au lieu d'une passe 2D :
@@ -160,7 +160,7 @@ def erosion_binaire(masque, taille):
     Érosion binaire : un pixel reste True seulement si TOUS les pixels
     de sa fenêtre locale sont True.
 
-    COURS S10 — Morphologie mathématique :
+    Morphologie mathématique :
         Érosion(A) = { p | fenêtre(p) ⊆ A }
 
     Effets : supprime les petits objets isolés, réduit les contours.
@@ -192,7 +192,7 @@ def dilatation_binaire(masque, taille):
     Dilatation binaire : un pixel devient True dès qu'AU MOINS UN pixel
     de sa fenêtre locale est True.
 
-    COURS S10 — Morphologie mathématique :
+    Morphologie mathématique :
         Dilatation(A) = { p | fenêtre(p) ∩ A ≠ ∅ }
 
     Effets : agrandit les objets, referme les petits trous.
@@ -222,7 +222,7 @@ def ouverture_binaire(masque, taille):
     """
     Ouverture = Érosion puis Dilatation.
     Supprime les petits objets sans trop modifier les grands.
-    COURS S10.
+    S10.
     """
     return dilatation_binaire(erosion_binaire(masque, taille), taille)
 
@@ -231,7 +231,7 @@ def fermeture_binaire(masque, taille):
     """
     Fermeture = Dilatation puis Érosion.
     Bouche les petits trous sans trop modifier les contours extérieurs.
-    COURS S10.
+    S10.
     """
     return erosion_binaire(dilatation_binaire(masque, taille), taille)
 
@@ -243,7 +243,7 @@ def gradient_sobel_xy(image):
     """
     Calcule les composantes Gx et Gy du gradient de Sobel SÉPARÉMENT.
 
-    COURS S9 — Opérateur de Sobel
+    Opérateur de Sobel
     ──────────────────────────────
     On retourne Gx ET Gy séparément (pas seulement |G|) car la NMS de Canny
     a besoin de la DIRECTION du gradient pour savoir dans quelle direction
@@ -284,7 +284,7 @@ def suppression_non_max(magnitude, gx, gy):
     Canny étape 2 : amincit les bords en ne gardant que les maxima locaux
     dans la direction du gradient.
 
-    COURS S9 — Algorithme de Canny
+    Algorithme de Canny
     ────────────────────────────────
     Principe : un pixel de contour doit être le plus fort de ses voisins dans
     la direction perpendiculaire au contour (= direction du gradient).
@@ -341,7 +341,7 @@ def hysteresis_seuillage(nms, seuil_haut, seuil_bas):
     """
     Canny étape 3 : double seuillage avec propagation par hystérésis.
 
-    COURS S9 — Algorithme de Canny (suite)
+    Algorithme de Canny (suite)
     ────────────────────────────────────────
     Trois catégories de pixels après NMS :
 
@@ -477,7 +477,7 @@ def _pipeline_interne(chemin, taille_flou=(7, 7)):
     nms_norm = nms / (nms.max() + 1e-8)
 
     # ── S9 : Hystérésis (Canny étape 3) ──────────────────────────────────────
-    # seuil_haut = Otsu sur la carte NMS (automatique, cours S5)
+    # seuil_haut = Otsu sur la carte NMS (automatique)
     # seuil_bas  = CANNY_SEUIL_BAS_RATIO × seuil_haut (convention standard)
     seuil_haut  = seuil_otsu(nms_norm)
     seuil_bas   = seuil_haut * CANNY_SEUIL_BAS_RATIO
