@@ -1,8 +1,9 @@
 import os
 import json
 from traitement import compter_pieces
+# from traitement_contours import compter_pieces  # pour tester le pipeline de contours dans la même évaluation
 
-def evaluer_modele(dossier_images, fichier_json, taille_flou=(7, 7)):
+def evaluer_modele(dossier_images, fichier_json, taille_flou=(7, 7), **kwargs):
     """
     Charge le JSON de la vérité terrain, exécute l'algorithme "compter_pieces" et calcule la MAE et la MSE.
     """
@@ -23,6 +24,7 @@ def evaluer_modele(dossier_images, fichier_json, taille_flou=(7, 7)):
         # Prédiction (yi)
         # taille_flou : paramètre qui contrôle l'intensité du flou gaussien appliqué à l'image avant d'analyser les pièces.
         prediction = compter_pieces(chemin, taille_flou)
+        # prediction = compter_pieces(chemin, **kwargs) # pour tester le pipeline de contours dans la même évaluation
         
         # Vérité terrain (ŷi)
         # Calcul des écarts
