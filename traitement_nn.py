@@ -1,174 +1,185 @@
+"""
+Inférence du CNN de comptage de pièces.
+
+Améliorations clés par rapport à la version précédente :
+  - Pipeline 4 canaux partagé via pipeline_traitement.py
+  - Chargement automatique des statistiques de normalisation depuis le checkpoint
+  - Test-Time Augmentation (TTA) : moyenne sur 8 transformations dihédrales
+  - Fallback gracieux vers le pipeline classique si le modèle est absent
+"""
+
 import os
-import cv2
-import numpy as np
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Fallback sur la méthode classique si les poids ne sont pas encore entraînés
+from pipeline_traitement import pretraiter_image_brut
+
+# Fallback sur le pipeline classique (traitement.py) si le modèle est indisponible
 try:
     from traitement import compter_pieces as compter_pieces_classique
 except ImportError:
     def compter_pieces_classique(chemin_image, *args, **kwargs):
-        print("[ERREUR] Méthode classique non trouvable.")
+        print("[ERREUR] Méthode classique non importable.")
         return 0
 
-# =============================================================================
-# 1. PRÉTRAITEMENT DE L'IMAGE
-# =============================================================================
-def pretraiter_image_inference(chemin_image):
-    """
-    Applique le même pipeline de prétraitement qu'à l'entraînement :
-    Luminance + Saturation HSL + Sobel -> 3 canaux -> 256x256
-    """
-    img_bgr = cv2.imread(chemin_image)
-    if img_bgr is None:
-        raise FileNotFoundError(f"Impossible de charger l'image : {chemin_image}")
-        
-    # Optimisation de performance : Redimensionner en 256x256 d'abord
-    # pour accélérer les calculs d'inférence CPU d'un facteur 110x
-    img_bgr_resized = cv2.resize(img_bgr, (256, 256), interpolation=cv2.INTER_LINEAR)
-    img_rgb = cv2.cvtColor(img_bgr_resized, cv2.COLOR_BGR2RGB)
-    
-    # 1) Gris Luminance
-    gray = ((0.299 * img_rgb[:, :, 0] + 0.587 * img_rgb[:, :, 1] + 0.114 * img_rgb[:, :, 2]) / 255.0).astype(np.float32)
-    
-    # 2) Saturation HSL
-    img_normalized = img_rgb.astype(np.float32) / 255.0
-    max_c = np.max(img_normalized, axis=2)
-    min_c = np.min(img_normalized, axis=2)
-    delta = max_c - min_c
-    L = (max_c + min_c) / 2.0
-    
-    S = np.zeros_like(L)
-    mask = delta > 1e-6
-    denom = 1.0 - np.abs(2.0 * L - 1.0)
-    S[mask] = delta[mask] / (denom[mask] + 1e-6)
-    S = np.clip(S, 0.0, 1.0)
-    
-    # 3) Magnitude de Sobel
-    sobel_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
-    sobel_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
-    sobel_mag = np.sqrt(sobel_x**2 + sobel_y**2)
-    
-    val_max = sobel_mag.max()
-    if val_max > 0:
-        sobel_mag = sobel_mag / val_max
-        
-    # Assemblage
-    stacked = np.stack([gray, S, sobel_mag], axis=2) # 256 x 256 x 3
-    
-    # Transposition vers format PyTorch (C x H x W)
-    tensor = stacked.transpose(2, 0, 1)
-    
-    # Ajouter la dimension de batch (1 x C x H x W)
-    tensor = np.expand_dims(tensor, axis=0)
-    return torch.from_numpy(tensor).float()
 
 # =============================================================================
-# 2. ARCHITECTURE DU MODÈLE (CUSTOM CNN)
+# ARCHITECTURE - doit correspondre exactement à entrainer_nn.py
 # =============================================================================
 class CustomCNN(nn.Module):
-    def __init__(self):
-        super(CustomCNN, self).__init__()
-        
-        # Conv + BN + ReLU + MaxPool blocks
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm2d(32)
-        
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm2d(64)
-        
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        self.bn3 = nn.BatchNorm2d(128)
-        
-        self.conv4 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
-        self.bn4 = nn.BatchNorm2d(256)
-        
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.dropout = nn.Dropout(p=0.3)
-        
-        # Régression
-        self.fc1 = nn.Linear(256, 128)
-        self.fc2 = nn.Linear(128, 1)
-        
+    def __init__(self, in_channels=4):
+        super().__init__()
+
+        def block(in_c, out_c):
+            return nn.Sequential(
+                nn.Conv2d(in_c, out_c, kernel_size=3, padding=1, bias=False),
+                nn.BatchNorm2d(out_c),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(out_c, out_c, kernel_size=3, padding=1, bias=False),
+                nn.BatchNorm2d(out_c),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(kernel_size=2, stride=2),
+            )
+
+        self.b1 = block(in_channels, 32)
+        self.b2 = block(32, 64)
+        self.b3 = block(64, 128)
+        self.b4 = block(128, 256)
+
+        self.gap = nn.AdaptiveAvgPool2d(1)
+        self.dropout = nn.Dropout(0.4)
+        self.fc1 = nn.Linear(256, 64)
+        self.fc2 = nn.Linear(64, 1)
+
     def forward(self, x):
-        x = self.pool(F.relu(self.bn1(self.conv1(x))))
-        x = self.pool(F.relu(self.bn2(self.conv2(x))))
-        x = self.pool(F.relu(self.bn3(self.conv3(x))))
-        x = self.pool(F.relu(self.bn4(self.conv4(x))))
-        
-        x = F.adaptive_avg_pool2d(x, (1, 1))
-        x = torch.flatten(x, 1)
-        
+        x = self.b1(x)
+        x = self.b2(x)
+        x = self.b3(x)
+        x = self.b4(x)
+        x = self.gap(x).flatten(1)
         x = self.dropout(x)
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
         return x
 
-# Instance globale du modèle (chargé paresseusement lors du premier appel)
+
+# =============================================================================
+# Chargement paresseux du modèle + statistiques de normalisation
+# =============================================================================
 _model_instance = None
+_norm_stats = None          # tuple (mean tensor 4x1x1, std tensor 4x1x1)
 _model_failed = False
 
+
 def get_model(chemin_poids="meilleur_modele_nn.pth"):
-    global _model_instance, _model_failed
-    
+    global _model_instance, _norm_stats, _model_failed
+
     if _model_failed:
         return None
-        
     if _model_instance is not None:
         return _model_instance
-        
+
     if not os.path.exists(chemin_poids):
         print(f"\n[ATTENTION] Fichier de poids '{chemin_poids}' introuvable.")
-        print("-> Veuillez d'abord lancer l'entraînement sur Colab/Kaggle en utilisant 'entrainer_nn.py'")
-        print("-> Téléchargez ensuite le fichier 'meilleur_modele_nn.pth' et placez-le dans ce dossier.")
-        print("-> Fallback automatique vers le pipeline classique de traitement d'images...\n")
+        print("-> Lancez d'abord entrainer_nn.py sur Kaggle/Colab.")
+        print("-> Téléchargez ensuite 'meilleur_modele_nn.pth' dans ce dossier.")
+        print("-> Fallback automatique vers le pipeline classique.\n")
         _model_failed = True
         return None
-        
+
     try:
-        model = CustomCNN()
-        # Charger les poids sur le CPU (Inférence locale)
-        model.load_state_dict(torch.load(chemin_poids, map_location=torch.device('cpu')))
+        ckpt = torch.load(chemin_poids, map_location=torch.device('cpu'))
+
+        # Nouveau format : dict avec 'model_state_dict', 'mean', 'std'
+        if isinstance(ckpt, dict) and 'model_state_dict' in ckpt:
+            in_ch = ckpt.get('in_channels', 4)
+            model = CustomCNN(in_channels=in_ch)
+            model.load_state_dict(ckpt['model_state_dict'])
+
+            mean = torch.tensor(ckpt['mean'], dtype=torch.float32).view(-1, 1, 1)
+            std = torch.tensor(ckpt['std'], dtype=torch.float32).view(-1, 1, 1)
+            _norm_stats = (mean, std)
+
+            val_mae = ckpt.get('val_mae', None)
+            if val_mae is not None:
+                print(f"[INFO] Modèle chargé (Val MAE = {val_mae:.2f}, epoch {ckpt.get('epoch', '?')}).")
+        else:
+            # Ancien format détecté → l'architecture est incompatible
+            print("[ATTENTION] Checkpoint en ancien format (incompatible avec le nouveau pipeline 4 canaux).")
+            print("-> Réentraînez avec entrainer_nn.py.\n")
+            _model_failed = True
+            return None
+
         model.eval()
         _model_instance = model
         return _model_instance
+
     except Exception as e:
-        print(f"[ERREUR] Échec du chargement du modèle CNN : {e}")
+        print(f"[ERREUR] Échec du chargement du modèle : {e}")
         _model_failed = True
         return None
 
+
+def _normaliser(x):
+    """Applique la normalisation par-canal stockée dans le checkpoint."""
+    mean, std = _norm_stats
+    return (x - mean) / std
+
+
+def _predire_avec_tta(model, x_norm):
+    """
+    Test-Time Augmentation : moyenne des prédictions sur les 8 transformations
+    du groupe diédral D4 (4 rotations x 2 flips = 8 variantes).
+    Robuste aux symétries qui pourraient être absentes du jeu d'entraînement.
+    """
+    predictions = []
+    with torch.no_grad():
+        for k in range(4):
+            for flip in (False, True):
+                x_aug = x_norm
+                if k > 0:
+                    x_aug = torch.rot90(x_aug, k, dims=[2, 3])
+                if flip:
+                    x_aug = torch.flip(x_aug, dims=[3])
+                pred = model(x_aug).item()
+                predictions.append(pred)
+    return sum(predictions) / len(predictions)
+
+
 # =============================================================================
-# 3. INTERFACE DE COMPTAGE DES PIÈCES
+# INTERFACE PUBLIQUE - compatible avec evaluation.py
 # =============================================================================
 def compter_pieces(chemin_image, *args, **kwargs):
     """
-    Interface compatible avec evaluation.py.
-    Utilise le modèle CNN si disponible, sinon bascule sur l'approche classique.
+    Compte le nombre de pièces dans l'image.
+    Utilise le CNN si disponible, sinon bascule sur le pipeline classique.
+
+    Signature compatible avec evaluation.py :
+        compter_pieces(chemin, taille_flou)
     """
     model = get_model()
-    
-    # Fallback si le modèle n'est pas disponible / pas encore entraîné
+
     if model is None:
-        # On passe la taille du flou gaussien si elle est fournie
-        taille_flou = kwargs.get("taille_flou", (7, 7))
-        if len(args) > 0:
-            taille_flou = args[0]
+        # Fallback : on transmet la taille du flou au pipeline classique
+        taille_flou = args[0] if args else kwargs.get("taille_flou", (7, 7))
         return compter_pieces_classique(chemin_image, taille_flou)
-        
+
     try:
-        # Inférence avec le CNN
-        with torch.no_grad():
-            x = pretraiter_image_inference(chemin_image)
-            prediction = model(x)
-            
-            # Récupérer la valeur scalaire
-            valeur_predite = prediction.item()
-            
-            # Régression : arrondir à l'entier le plus proche et forcer >= 0 (Semaine 12)
-            nombre_pieces = max(0, int(round(valeur_predite)))
-            return nombre_pieces
+        # 1) Prétraitement (4 canaux, dans [0, 1])
+        x = pretraiter_image_brut(chemin_image)         # 4 x 256 x 256
+        x = x.unsqueeze(0)                              # 1 x 4 x 256 x 256
+
+        # 2) Normalisation par-canal
+        x = _normaliser(x)
+
+        # 3) Inférence + TTA (8 variantes)
+        prediction = _predire_avec_tta(model, x)
+
+        # 4) Régression → entier positif (Semaine 12)
+        return max(0, int(round(prediction)))
+
     except Exception as e:
-        print(f"[ERREUR] Inférence CNN échouée pour {chemin_image} : {e}. Fallback classique...")
+        print(f"[ERREUR] Inférence CNN échouée pour {chemin_image} : {e}. Fallback classique.")
         return compter_pieces_classique(chemin_image)
