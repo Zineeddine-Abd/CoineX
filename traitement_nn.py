@@ -29,7 +29,7 @@ except ImportError:
 # ARCHITECTURE - doit correspondre exactement à entrainer_nn.py
 # =============================================================================
 class CustomCNN(nn.Module):
-    def __init__(self, in_channels=4):
+    def __init__(self, in_channels=5):
         super().__init__()
 
         def block(in_c, out_c):
@@ -94,7 +94,7 @@ def get_model(chemin_poids="meilleur_modele_nn.pth"):
 
         # Nouveau format : dict avec 'model_state_dict', 'mean', 'std'
         if isinstance(ckpt, dict) and 'model_state_dict' in ckpt:
-            in_ch = ckpt.get('in_channels', 4)
+            in_ch = ckpt.get('in_channels', 5)
             model = CustomCNN(in_channels=in_ch)
             model.load_state_dict(ckpt['model_state_dict'])
 

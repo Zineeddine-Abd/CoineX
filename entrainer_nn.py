@@ -25,7 +25,7 @@ import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from torch.utils.data import Dataset, DataLoader
 
-from pipeline_traitement import pretraiter_image_brut
+from pipeline_traitement import pretraiter_image_brut, NUM_CHANNELS
 
 
 # =============================================================================
@@ -34,16 +34,19 @@ from pipeline_traitement import pretraiter_image_brut
 def calculer_statistiques_dataset(preloaded_data):
     """
     Calcule la moyenne et l'écart-type par canal sur les données pré-chargées
-    (non augmentées, non normalisées). Renvoie deux tenseurs de taille (4,).
+    (non augmentées, non normalisées). Renvoie deux tenseurs de taille (C,)
+    où C est le nombre de canaux détecté dans les données.
 
     Référence cours Semaine 7 : « la normalisation permet aux algorithmes de
     se concentrer sur la distribution plutôt que sur l'illumination globale ».
     """
-    sum_ = torch.zeros(4, dtype=torch.float64)
-    sum_sq = torch.zeros(4, dtype=torch.float64)
+    # Détection dynamique du nombre de canaux (4 ou 5 selon le pipeline)
+    n_channels = preloaded_data[0][0].shape[0]
+    sum_ = torch.zeros(n_channels, dtype=torch.float64)
+    sum_sq = torch.zeros(n_channels, dtype=torch.float64)
     n = 0
     for x, _ in preloaded_data:
-        flat = x.view(4, -1).to(torch.float64)
+        flat = x.view(n_channels, -1).to(torch.float64)
         sum_ += flat.sum(dim=1)
         sum_sq += (flat * flat).sum(dim=1)
         n += flat.shape[1]
@@ -97,16 +100,18 @@ class CoinDataset(Dataset):
 
     def _augmenter(self, x):
         """
-        Augmentation forte sur tenseur (4 x H x W, valeurs dans [0, 1]).
+        Augmentation forte sur tenseur (C x H x W, valeurs dans [0, 1]).
 
         - Géométrique (tous canaux ensemble) : flips, rotations 90°, rotation libre
         - Photométrique (canal par canal) :
             * Luminosité : luminance uniquement (Semaine 7 - décalage histogramme)
             * Contraste : luminance uniquement
-            * Bruit Gaussien : canaux continus (Sem. 9 - simule le grain capteur)
-            * Flou Gaussien : luminance + Sobel (simule défocus)
-        Le masque Otsu (canal 3) reste protégé des changements photométriques
-        car il est binaire par construction.
+            * Bruit Gaussien : canaux continus 0-2 (Sem. 9 - grain capteur)
+            * Flou Gaussien : canaux continus 0-2 (simule défocus)
+
+        Les canaux binaires Otsu (3) et Canny (4) sont PROTÉGÉS des
+        augmentations photométriques car ils sont binaires par construction.
+        Seules les transformations géométriques s'y appliquent.
         """
         # --- Géométrique ---
         if random.random() < 0.5:
@@ -124,6 +129,13 @@ class CoinDataset(Dataset):
                 x.unsqueeze(0), angle, fill=0.0,
                 interpolation=TF.InterpolationMode.BILINEAR,
             ).squeeze(0)
+            # Re-binariser les canaux binaires (Otsu 3, Canny 4) après interpolation.
+            # Sinon la rotation crée des valeurs intermédiaires qui cassent la
+            # propriété binaire de ces canaux.
+            if x.shape[0] >= 4:
+                x[3] = (x[3] > 0.5).float()
+            if x.shape[0] >= 5:
+                x[4] = (x[4] > 0.5).float()
 
         # --- Photométrique ---
         # Décalage de luminosité sur la luminance (canal 0)
@@ -164,10 +176,10 @@ class CustomCNN(nn.Module):
       - 4 blocs convolutifs (Conv-BN-ReLU x2 + MaxPool)
       - Global Average Pooling (robuste à la translation)
       - 2 couches denses avec Dropout
-    Total : ~785k paramètres
+    Total : ~1.19M paramètres pour in_channels=5
     """
 
-    def __init__(self, in_channels=4):
+    def __init__(self, in_channels=5):
         super().__init__()
 
         def block(in_c, out_c):
@@ -248,9 +260,10 @@ def entrainer_modele(epochs=200, batch_size=16, lr=1e-3, patience=30,
 
     # --- [3/5] Modèle, loss, optimiseur ---
     print("\n[3/5] Initialisation du modèle...")
-    model = CustomCNN(in_channels=4).to(device)
+    model = CustomCNN(in_channels=NUM_CHANNELS).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  Paramètres totaux : {n_params:,}")
+    print(f"  Canaux d'entrée : {NUM_CHANNELS}")
 
     # Huber / SmoothL1 : robuste aux outliers ET dérivable en 0
     # (Semaine 3 : MSE pénalise lourdement les outliers, MAE n'est pas dérivable)
@@ -346,7 +359,7 @@ def entrainer_modele(epochs=200, batch_size=16, lr=1e-3, patience=30,
                 'model_state_dict': model.state_dict(),
                 'mean': mean.tolist(),
                 'std': std.tolist(),
-                'in_channels': 4,
+                'in_channels': NUM_CHANNELS,
                 'val_mae': val_mae_acc,
                 'val_exact_pct': val_exact_pct,
                 'epoch': epoch,

@@ -12,15 +12,15 @@ def main():
 
     # 1- PHASE DE VALIDATION
     # En ajustant la taille du flou, on cherche à obtenir la MAE et la MSE les plus basses possibles.
-    # print("PHASE DE VALIDATION (Réglage des hyperparamètres)")
-    # meilleur_flou = (7, 7)
-    # evaluer_modele(DOSSIER_VALIDATION, JSON_VALIDATION, taille_flou=meilleur_flou)
-    # print("PHASE DE TRAINING (Réglage des hyperparamètres)")
-    # meilleur_flou = (7, 7)
-    # evaluer_modele(DOSSIER_TRAINING, JSON_TRAINING, taille_flou=meilleur_flou)
+    print("PHASE DE VALIDATION (Réglage des hyperparamètres)")
+    meilleur_flou = (7, 7)
+    evaluer_modele(DOSSIER_VALIDATION, JSON_VALIDATION, taille_flou=meilleur_flou)
+    print("PHASE DE TRAINING (Réglage des hyperparamètres)")
+    meilleur_flou = (7, 7)
+    evaluer_modele(DOSSIER_TRAINING, JSON_TRAINING, taille_flou=meilleur_flou)
 
     # 2- PHASE DE TEST (RÈGLE D'OR)
-    meilleur_flou = (7, 7)
+    # meilleur_flou = (7, 7)
     print("\n\nPHASE DE TEST (Évaluation finale)")
     evaluer_modele(DOSSIER_TEST, JSON_TEST, taille_flou=meilleur_flou)
 

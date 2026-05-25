@@ -96,7 +96,8 @@ def evaluer_modele(dossier_images, fichier_json, taille_flou=(7, 7), **kwargs):
     mean_real_amount = sum(verite_terrain.values()) / N
     mae_percentage = (mae / mean_real_amount) * 100 if mean_real_amount > 0 else 0
 
-    print("-" * 40)
+    print("-" * 50)
+    print(f"\nÉvaluation sur le dataset : {fichier_json}")
     # La MAE renseigne directement sur la distance moyenne aux prédictions.
     print(f"MAE  (Erreur Absolue Moyenne)        : {mae:.2f} pièces")
 
@@ -111,6 +112,6 @@ def evaluer_modele(dossier_images, fichier_json, taille_flou=(7, 7), **kwargs):
 
     print(f"Nombre Moyen Réel de Pièces          : {mean_real_amount:.2f}")
     print(f"Pourcentage d'Erreur (MAE/Mean)      : {mae_percentage:.2f}%")
-    print("-" * 40)
+    print("-" * 50)
 
     
