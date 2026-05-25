@@ -5,7 +5,7 @@ from evaluation import evaluer_modele
 def main():
     parser = argparse.ArgumentParser(description="Évaluation de CoineX")
     parser.add_argument("--pipeline", type=str, default="morphologie",
-                        choices=["morphologie", "contours", "opencv", "nn"],
+                        choices=["morphologie", "contours", "nn"],
                         help="Choix du pipeline à évaluer (morphologie par défaut)")
     parser.add_argument("--mode", type=str, default="validation", 
                         choices=["validation", "test"], 
@@ -22,8 +22,6 @@ def main():
             from pipelines.morphologie.traitement import compter_pieces
         elif args.pipeline == "contours":
             from pipelines.contours.traitement import compter_pieces
-        elif args.pipeline == "opencv":
-            from pipelines.opencv_test.traitement import compter_pieces
         elif args.pipeline == "nn":
             from pipelines.nn.traitement import compter_pieces
         
