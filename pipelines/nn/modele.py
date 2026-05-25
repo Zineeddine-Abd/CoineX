@@ -6,7 +6,7 @@ Architecture CNN VGG-like pour le pipeline NN.
   - 2 couches denses avec Dropout
   - ~1.19M paramètres pour in_channels=5
 
-Référence cours : Semaine 12 (CNN, perceptron, descente de gradient).
+Référence cours : (CNN, perceptron, descente de gradient).
 """
 import torch
 import torch.nn as nn

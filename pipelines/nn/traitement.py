@@ -156,7 +156,7 @@ def compter_pieces(chemin_image, **kwargs):
         # 3) Inférence + TTA (8 variantes lossless)
         prediction = _predire_avec_tta(model, x)
 
-        # 4) Régression → entier positif (Semaine 12)
+        # 4) Régression → entier positif
         return max(0, int(round(prediction)))
 
     except Exception as e:

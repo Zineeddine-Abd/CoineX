@@ -3,7 +3,7 @@ Entraînement du CNN de comptage de pièces (à exécuter sur Kaggle/Colab avec 
 
 Améliorations clés :
   - Pipeline 5 canaux partagé via pipelines.nn.pretraitement
-  - Normalisation par-canal (mean/std calculés sur le train) - Semaine 7
+  - Normalisation par-canal (mean/std calculés sur le train)
   - Architecture VGG-like (double conv par bloc) - ~1.19M params
   - Augmentation forte : photométrique + géométrique (rotation libre ±20°)
   - Loss Huber (SmoothL1) au lieu de MSE pur
@@ -89,7 +89,7 @@ class CoinDataset(Dataset):
         if self.augment:
             x = self._augmenter(x)
 
-        # Normalisation par-canal APRÈS augmentation (Semaine 7)
+        # Normalisation par-canal APRÈS augmentation 
         if self.mean is not None:
             x = (x - self.mean) / self.std
 
@@ -100,9 +100,9 @@ class CoinDataset(Dataset):
         Augmentation forte sur tenseur (5 x H x W, valeurs [0, 1]).
         - Géométrique (tous canaux ensemble) : flips, rot 90/180/270, rotation libre
         - Photométrique (canaux continus 0-2 uniquement) :
-            * Luminosité : luminance uniquement (Semaine 7 - décalage histogramme)
+            * Luminosité : luminance uniquement (décalage histogramme)
             * Contraste : luminance uniquement
-            * Bruit Gaussien : canaux 0-2 (Semaine 9 - grain capteur)
+            * Bruit Gaussien : canaux 0-2 (grain capteur)
             * Flou Gaussien : canaux 0-2 (simule défocus)
         Les canaux binaires (3 Otsu, 4 Canny) sont protégés du photométrique.
         """
