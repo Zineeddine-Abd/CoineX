@@ -19,6 +19,7 @@ CoineX/
 │   ├── morphologie/         # La méthode officielle (HSV + Otsu + Morphologie)
 │   ├── contours/            # Méthode alternative (Canny / Sobel)
 │   ├── opencv_test/         # Test de validation avec la vraie librairie OpenCV
+│   ├── nn/                  # Approche Deep Learning (CNN VGG-like, 5 canaux)
 │   └── archives/            # Anciennes versions du code
 │
 ├── utils/                   # Outils partagés
@@ -70,6 +71,12 @@ python main.py --pipeline contours
 python main.py --pipeline opencv
 ```
 
+**Lancer la méthode Deep Learning (CNN) :**
+```bash
+python main.py --pipeline nn
+```
+*Nécessite `meilleur_modele_nn.pth` à la racine du projet. Voir la section ci-dessous pour l'entraînement.*
+
 **Lancer l'évaluation finale sur le dataset de test :**
 ```bash
 python main.py --mode test
@@ -89,6 +96,40 @@ Pour voir les étapes de la méthode par **Contours** :
 python pipelines/contours/visualizer.py data/validation/img_001.jpg
 ```
 *(Remplacez `img_001.jpg` par n'importe quelle autre image du dossier `data/validation/`)*
+
+---
+
+## Pipeline NN (Deep Learning)
+
+Le pipeline `nn` utilise un CNN VGG-like (~1.19M paramètres) qui prend en entrée 5 canaux :
+- **Luminance** Y (continu)
+- **Saturation** HLS (continu)
+- **Magnitude Sobel** (continu)
+- **Masque Otsu + morphologie** (binaire)
+- **Contours Canny** (binaire)
+
+L'entraînement se fait sur Kaggle (GPU T4 gratuit) via le notebook fourni :
+
+```
+pipelines/nn/coinex-nn-pipeline.ipynb
+```
+
+Étapes :
+1. Upload du notebook sur Kaggle, attacher le dataset d'entraînement
+2. Lancer "Save & Run All" (~1.5 h sur T4)
+3. Télécharger le checkpoint produit : `/kaggle/working/meilleur_modele_nn.pth`
+4. Placer ce fichier **à la racine du projet** (à côté de `main.py`)
+5. Lancer `python main.py --pipeline nn`
+
+Le checkpoint contient les poids du modèle ET les statistiques de normalisation
+(mean/std par canal calculées sur le train set), donc tout est self-contained.
+
+À l'inférence, on applique **Test-Time Augmentation** : 8 passages du modèle
+sur les 8 transformations du groupe diédral D4 (4 rotations × 2 flips), puis
+moyenne des prédictions pour réduire la variance.
+
+Si le checkpoint est absent, le pipeline `nn` bascule automatiquement vers
+`morphologie` pour ne pas casser l'évaluation.
 
 ---
 

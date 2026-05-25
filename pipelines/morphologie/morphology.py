@@ -1,6 +1,5 @@
 import math
 from collections import deque
-import matplotlib.image as mpimg
 import numpy as np
 
 # =============================================================================

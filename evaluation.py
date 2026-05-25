@@ -5,8 +5,8 @@ def evaluer_modele(dossier_images, fichier_json, pipeline="morphologie", **kwarg
     """
     Charge le JSON de la vérité terrain, exécute l'algorithme "compter_pieces" du pipeline choisi
     et calcule la MAE et la MSE.
-    
-    Pipelines disponibles : "morphologie", "contours", "opencv"
+
+    Pipelines disponibles : "morphologie", "contours", "opencv", "nn"
     """
     # Import dynamique selon le pipeline
     if pipeline == "morphologie":
@@ -15,6 +15,8 @@ def evaluer_modele(dossier_images, fichier_json, pipeline="morphologie", **kwarg
         from pipelines.contours.traitement import compter_pieces
     elif pipeline == "opencv":
         from pipelines.opencv_test.traitement import compter_pieces
+    elif pipeline == "nn":
+        from pipelines.nn.traitement import compter_pieces
     else:
         raise ValueError(f"Pipeline non reconnu : {pipeline}")
 

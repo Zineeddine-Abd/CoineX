@@ -22,9 +22,8 @@ import sys
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
 
-from traitement_contours import pipeline_contours
+from traitement import pipeline_contours
 
 
 def _verite_terrain(chemin_image):
