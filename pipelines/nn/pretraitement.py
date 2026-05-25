@@ -39,11 +39,6 @@ def pretraiter_image_brut(chemin_image):
     if img_bgr is None:
         raise FileNotFoundError(f"Impossible de lire l'image : {chemin_image}")
 
-    h, w = img_bgr.shape[:2]
-    # Facteur d'échelle : dimensionne la dilatation Canny pour que les bords
-    # fins survivent au downsampling vers 384.
-    scale = max(h, w) / TARGET_SIZE
-
     # ----- 1) Pré-débruitage Gaussien (étape 1 de Canny) -----
     # Cible le bruit pixel-par-pixel (capteur, JPEG) à l'échelle absolue.
     img_bgr = cv2.GaussianBlur(img_bgr, (5, 5), sigmaX=1.0)
@@ -92,32 +87,32 @@ def pretraiter_image_brut(chemin_image):
     if (otsu_hi > 0).mean() > 0.5:
         otsu_hi = 255 - otsu_hi
 
-    # ----- Canal 4 : Canny à pleine résolution (algo complet) -----
-    # Canny = 4 étapes : 1) flou (déjà fait), 2) gradient, 3) suppression
-    # des non-maxima (affine à 1 px), 4) seuillage par hystérésis (Sem. 5).
-    # Donne des bords binaires ULTRA-NETS (contrairement à Sobel grayscale).
-    # Important : calculé sur l'image NON-égalisée pour éviter que les
-    # micro-gradients amplifiés ne soient classés comme bords.
-    canny_hi = cv2.Canny(gray_raw_u8, 100, 200)
-
-    # Dilatation légère pour préserver les bords (1-2 px) à travers le downsampling.
-    dilate_radius = max(1, int(round(scale / 4.0)))
-    dilate_kernel = cv2.getStructuringElement(
-        cv2.MORPH_RECT, (2 * dilate_radius + 1, 2 * dilate_radius + 1)
-    )
-    canny_hi = cv2.dilate(canny_hi, dilate_kernel, iterations=1)
-
     # ----- Réduction à 384x384 (INTER_AREA = anti-aliasing) -----
     tgt = (TARGET_SIZE, TARGET_SIZE)
     gray = cv2.resize(gray, tgt, interpolation=cv2.INTER_AREA)
     sat = cv2.resize(sat, tgt, interpolation=cv2.INTER_AREA)
     sobel_mag = cv2.resize(sobel_mag, tgt, interpolation=cv2.INTER_AREA)
+    # Image grise non-égalisée downsamplée (pour Canny)
+    gray_raw_384 = cv2.resize(gray_raw_u8, tgt, interpolation=cv2.INTER_AREA)
 
-    # Otsu et Canny : downsample puis re-binarise pour récupérer un vrai masque {0, 1}
+    # Otsu : downsample puis re-binarise pour récupérer un vrai masque {0, 1}
     otsu_small = cv2.resize(otsu_hi, tgt, interpolation=cv2.INTER_AREA)
     _, otsu_bin = cv2.threshold(otsu_small, 127, 255, cv2.THRESH_BINARY)
-    canny_small = cv2.resize(canny_hi, tgt, interpolation=cv2.INTER_AREA)
-    _, canny_bin = cv2.threshold(canny_small, 127, 255, cv2.THRESH_BINARY)
+
+    # ----- Canal 4 : Canny DIRECTEMENT à 384x384 (algo complet) -----
+    # Canny = 4 étapes : 1) flou (déjà fait), 2) gradient,
+    # 3) suppression des non-maxima (affine à 1 px), 4) seuillage hystérésis.
+    # Donne des bords binaires ULTRA-NETS (contrairement à Sobel grayscale).
+    #
+    # On calcule Canny DIRECTEMENT à 384x384 (et non au plein res + dilatation) :
+    # - évite l'épaississement artificiel par dilatation
+    # - les bords sont déjà à la bonne échelle (1 px = 1 px d'entrée du CNN)
+    # - cv2.Canny renvoie déjà du binaire {0, 255}
+    #
+    # Seuils fixes 100/200 (standard Canny) appliqués sur l'image NON-égalisée.
+    # L'égalisation amplifierait les micro-gradients en faux bords ; sur image
+    # brute, on détecte les bords NATURELS (pourtours des pièces).
+    canny_bin = cv2.Canny(gray_raw_384, 100, 200)
 
     # ----- Morphologie sur Otsu à 384x384 -----
     # Noyaux 5 et 11 = ~1.3% et 2.9% de la largeur, cohérent avec coins ~30-50px
