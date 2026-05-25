@@ -13,7 +13,15 @@ Comment utiliser :
     python visualizer.py data/validation/img_001.jpg
 """
 
+import os
 import sys
+
+# Add project root to sys.path so that 'utils' package is resolvable when
+# this script is run directly (python pipelines/morphologie/visualizer.py).
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np

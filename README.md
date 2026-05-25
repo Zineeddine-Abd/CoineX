@@ -1,142 +1,195 @@
 # CoineX — Comptage Automatique de Pièces de Monnaie
 
-Un projet universitaire de traitement d'images réalisé dans le cadre du cours **Image** de L3 .
+Projet universitaire de traitement d'images — L3 Informatique, cours **Image**.
 
-**L'objectif est simple :** à partir d’une image contenant des pièces de monnaie posées sur une surface, prédire automatiquement le nombre exact de pièces détectées.
+**Objectif :** à partir d'une photo de pièces de monnaie posées sur une surface, prédire automatiquement le nombre exact de pièces.
 
+---
 
 ## Architecture du Projet
-
-Le code a été structuré de manière professionnelle et modulaire pour que chaque approche (pipeline) soit séparée et facile à comprendre.
 
 ```text
 CoineX/
 │
-├── main.py                  # Point d'entrée principal (votre télécommande)
-├── evaluation.py            # Script d'évaluation commun à tous les algorithmes
+├── main.py                        # Point d'entrée : évaluation et test image unique
+├── evaluation.py                  # Calcul des métriques (MAE, MSE, RMSE, accuracy)
 │
-├── pipelines/               # Les différents algorithmes développés
-│   ├── morphologie/         # La méthode officielle (HSV + Otsu + Morphologie)
-│   ├── contours/            # Méthode alternative (Canny / Sobel)
-│   ├── opencv_test/         # Test de validation avec la vraie librairie OpenCV
-│   ├── nn/                  # Approche Deep Learning (CNN VGG-like, 5 canaux)
-│   └── archives/            # Anciennes versions du code
+├── pipelines/
+│   ├── morphologie/               # Pipeline principal (implémenté from scratch)
+│   │   ├── traitement.py          # Exports publics du pipeline
+│   │   ├── detection.py           # Fonction principale compter_pieces()
+│   │   ├── morphology.py          # Érosion, dilatation, ouverture, fermeture, BFS
+│   │   ├── segmentation.py        # Histogramme, Otsu, égalisation
+│   │   ├── filters.py             # Flou gaussien séparable
+│   │   ├── config.py              # Hyperparamètres (seuils de forme)
+│   │   └── visualizer.py          # Visualisation étape par étape (8 panneaux)
+│   │
+│   ├── contours/                  # Pipeline alternatif (OpenCV)
+│   │   ├── traitement.py          # Pipeline complet + compter_pieces()
+│   │   └── visualizer.py          # Visualisation étape par étape
+│   │
+│   └── nn/                        # Pipeline Deep Learning (CNN VGG-like)
+│       ├── traitement.py          # Inférence + TTA + fallback morphologie
+│       ├── modele.py              # Architecture CNN (5 canaux, ~1.19M paramètres)
+│       ├── pretraitement.py       # Construction des 5 canaux d'entrée
+│       └── entrainement.py        # Script d'entraînement (utilisé sur Kaggle)
 │
-├── utils/                   # Outils partagés
-│   ├── io_utils.py          # Lecture d'image et redimensionnement
-│   └── color.py             # Conversion RGB -> HSL / Gris
+├── utils/
+│   ├── io_utils.py                # Lecture d'image, redimensionnement bilinéaire
+│   └── color.py                   # Conversion RGB → HSL / Niveaux de gris
 │
-├── scripts/                 
-│   └── preparer_dataset.py  # Script pour annoter et créer de nouveaux datasets
+├── scripts/
+│   └── preparer_dataset.py        # Annotation et division du dataset
 │
-└── data/                    # Le dataset
-    ├── validation/          # Images de validation (pour régler les hyperparamètres)
-    └── test/                # Images de test (à ne regarder qu'à la toute fin)
+└── data/
+    ├── validation.json            # Vérité terrain — 140 images de validation
+    ├── test.json                  # Vérité terrain — 60 images de test
+    ├── validation/                # Images de validation (gitignorées)
+    └── test/                      # Images de test (gitignorées)
 ```
 
 ---
 
-## Comment exécuter et tester le projet ?
+## Pipelines Disponibles
+
+### Pipeline Morphologie (principal, from scratch)
+
+Implémenté entièrement en NumPy sans librairie de vision.
+
+**Chaîne de traitement :**
+1. Lecture et normalisation de l'image (uint8 RGB)
+2. Redimensionnement bilinéaire (max 520px)
+3. Conversion RGB → HSL, extraction de la saturation
+4. Flou gaussien séparable (noyau adaptatif)
+5. Seuillage automatique d'Otsu
+6. Ouverture + fermeture morphologique binaire
+7. Extraction des composantes connexes (BFS 8-connexe)
+8. Filtrage par aire et position (rejet des bords)
+9. Estimation du nombre de pièces par ratio d'aire médiane
+10. Détection secondaire "pièce unique" (par contraste sur fond)
+
+### Pipeline Contours (alternatif, OpenCV)
+
+Basé sur la détection de contours par gradient.
+
+**Chaîne de traitement :**
+1. Sous-échantillonnage (800px)
+2. Niveaux de gris → flou fort → égalisation d'histogramme
+3. Flou doux → Sobel (Gx, Gy, magnitude)
+4. Seuillage d'Otsu sur la magnitude
+5. Fermeture morphologique → remplissage des silhouettes
+6. Ouverture → érosion circulaire (sépare les pièces tangentes)
+7. Filtrage par circularité, solidité et ratio de forme
+
+### Pipeline NN (Deep Learning, CNN)
+
+CNN VGG-like (~1.19M paramètres) entraîné sur Kaggle (GPU T4).
+
+**Entrée :** 5 canaux par image — Luminance Y, Saturation HSL, Magnitude Sobel, Masque Otsu+morphologie, Contours Canny.
+
+**Inférence :** Test-Time Augmentation sur les 8 transformations du groupe diédral D4 (4 rotations × 2 flips), puis moyenne.
+
+Si le fichier de poids `meilleur_modele_nn.pth` est absent, le pipeline bascule automatiquement sur la morphologie.
+
+---
+
+## Résultats
+
+| Pipeline      | Dataset     | MAE  | MSE   | RMSE | Accuracy |
+|---------------|-------------|------|-------|------|----------|
+| Morphologie   | Validation  | 1.74 | 11.81 | 3.44 | 50.0 %   |
+| Morphologie   | Test        | 2.12 | 20.92 | 4.57 | 53.3 %   |
+| Contours      | Validation  | 2.95 | 19.39 | 4.40 | 17.9 %   |
+| Contours      | Test        | 2.87 | 24.63 | 4.96 | 31.7 %   |
+
+Le pipeline morphologie est meilleur sur les deux datasets. Le pipeline contours souffre des fonds non uniformes et des pièces peu saturées.
+
+---
+
+## Comment Exécuter
 
 ### 1. Installation
-
-Assurez-vous d'avoir Python installé, puis ouvrez un terminal dans le dossier du projet et installez les quelques dépendances requises :
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Évaluer les performances (Le juge final)
+### 2. Évaluation sur le dataset complet
 
-Le fichier `main.py` est conçu pour évaluer vos algorithmes sur tout un dataset (140 images) et vous donner les scores finaux (Taux de réussite, MAE, MSE).
-
-**Lancer la méthode principale (Morphologie) sur tout le dataset :**
+**Pipeline morphologie (méthode principale) :**
 ```bash
 python main.py
+python main.py --pipeline morphologie --mode validation
+python main.py --pipeline morphologie --mode test
 ```
 
-**Tester l'algorithme sur une SEULE image :**
+**Pipeline contours :**
+```bash
+python main.py --pipeline contours --mode validation
+python main.py --pipeline contours --mode test
+```
+
+**Pipeline NN (nécessite le checkpoint — voir section ci-dessous) :**
+```bash
+python main.py --pipeline nn --mode validation
+python main.py --pipeline nn --mode test
+```
+
+### 3. Tester sur une seule image
+
 ```bash
 python main.py --image data/validation/img_001.jpg
-```
-*(Vous pouvez combiner avec `--pipeline contours` par exemple pour tester une autre méthode sur cette image !)*
-
-**Lancer la méthode par contours (sur tout le dataset) :**
-```bash
-python main.py --pipeline contours
+python main.py --image data/validation/img_001.jpg --pipeline contours
+python main.py --image data/validation/img_001.jpg --pipeline nn
 ```
 
-**Lancer le test OpenCV :**
-```bash
-python main.py --pipeline opencv
-```
+### 4. Visualiser le pipeline étape par étape
 
-**Lancer la méthode Deep Learning (CNN) :**
-```bash
-python main.py --pipeline nn
-```
-*Nécessite `meilleur_modele_nn.pth` à la racine du projet. Voir la section ci-dessous pour l'entraînement.*
-
-**Lancer l'évaluation finale sur le dataset de test :**
-```bash
-python main.py --mode test
-```
-
-### 3. Visualiser le fonctionnement étape par étape
-
-Si vous voulez comprendre comment l'algorithme "réfléchit" et voir l'image se transformer (passage en noir et blanc, flou, nettoyage, détection...), utilisez les **visualiseurs**.
-
-Pour voir les étapes de la **Morphologie** sur une image précise :
+**Morphologie (8 étapes : saturation → Otsu → morphologie → composantes) :**
 ```bash
 python pipelines/morphologie/visualizer.py data/validation/img_001.jpg
 ```
 
-Pour voir les étapes de la méthode par **Contours** :
+**Contours (Sobel → seuillage → remplissage → filtrage) :**
 ```bash
 python pipelines/contours/visualizer.py data/validation/img_001.jpg
 ```
-*(Remplacez `img_001.jpg` par n'importe quelle autre image du dossier `data/validation/`)*
 
 ---
 
-## Pipeline NN (Deep Learning)
+## Pipeline NN — Entraînement
 
-Le pipeline `nn` utilise un CNN VGG-like (~1.19M paramètres) qui prend en entrée 5 canaux :
-- **Luminance** Y (continu)
-- **Saturation** HLS (continu)
-- **Magnitude Sobel** (continu)
-- **Masque Otsu + morphologie** (binaire)
-- **Contours Canny** (binaire)
-
-L'entraînement se fait sur Kaggle (GPU T4 gratuit) via le notebook fourni :
-
+Le modèle est entraîné sur Kaggle (GPU T4, gratuit) via le notebook :
 ```
-pipelines/nn/coinex-nn-pipeline.ipynb
+pipelines/nn/entrainement.py
 ```
 
-Étapes :
-1. Upload du notebook sur Kaggle, attacher le dataset d'entraînement
-2. Lancer "Save & Run All" (~1.5 h sur T4)
-3. Télécharger le checkpoint produit : `/kaggle/working/meilleur_modele_nn.pth`
-4. Placer ce fichier **à la racine du projet** (à côté de `main.py`)
-5. Lancer `python main.py --pipeline nn`
+**Étapes :**
+1. Entraîner le modèle sur Kaggle (~1.5h sur T4)
+2. Télécharger le checkpoint : `meilleur_modele_nn.pth`
+3. Placer ce fichier **à la racine du projet** (à côté de `main.py`)
+4. Lancer `python main.py --pipeline nn`
 
-Le checkpoint contient les poids du modèle ET les statistiques de normalisation
-(mean/std par canal calculées sur le train set), donc tout est self-contained.
-
-À l'inférence, on applique **Test-Time Augmentation** : 8 passages du modèle
-sur les 8 transformations du groupe diédral D4 (4 rotations × 2 flips), puis
-moyenne des prédictions pour réduire la variance.
-
-Si le checkpoint est absent, le pipeline `nn` bascule automatiquement vers
-`morphologie` pour ne pas casser l'évaluation.
+Le checkpoint contient les poids ET les statistiques de normalisation (mean/std par canal), tout est auto-suffisant.
 
 ---
 
 ## Métriques d'Évaluation
 
-Le script `evaluation.py` calcule les scores suivants :
-- **Taux de prédictions exactes (Accuracy) :** Le pourcentage d'images où l'algorithme a trouvé le bon nombre exact de pièces.
-- **MAE (Erreur Absolue Moyenne) :** En moyenne, de combien de pièces l'algorithme se trompe-t-il par image ?
-- **MSE (Erreur Quadratique Moyenne) :** Pénalise très fortement les grosses erreurs (quand l'algorithme se trompe de 15 pièces d'un coup).
-- **RMSE :** Racine carrée de la MSE, pour ramener le score à la même unité que la MAE.
+- **Accuracy :** pourcentage d'images où le nombre exact est prédit
+- **MAE** (Erreur Absolue Moyenne) : erreur moyenne en nombre de pièces
+- **MSE** (Erreur Quadratique Moyenne) : pénalise les grosses erreurs
+- **RMSE** : racine de la MSE, même unité que la MAE
+
+---
+
+## Dataset
+
+200 images annotées manuellement, divisées en :
+- **140 images de validation** (réglage des hyperparamètres)
+- **60 images de test** (évaluation finale)
+
+Le dataset est gitignorié. Pour créer un nouveau dataset à partir de photos brutes :
+```bash
+python scripts/preparer_dataset.py
+```

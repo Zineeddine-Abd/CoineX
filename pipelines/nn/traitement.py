@@ -13,11 +13,14 @@ morphologie pour ne pas casser l'évaluation.
 """
 import os
 
-import torch
-import torch.nn.functional as F
-
-from pipelines.nn.pretraitement import pretraiter_image_brut
-from pipelines.nn.modele import CustomCNN
+try:
+    import torch
+    import torch.nn.functional as F
+    from pipelines.nn.pretraitement import pretraiter_image_brut
+    from pipelines.nn.modele import CustomCNN
+    _TORCH_AVAILABLE = True
+except ImportError:
+    _TORCH_AVAILABLE = False
 
 
 # Chemins possibles pour le checkpoint
